@@ -1,0 +1,220 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum StaffRole {
+  GERANT
+  TECHNICIEN
+  PRESTATAIRE
+}
+
+enum JobType {
+  DIOGENE
+  POST_MORTEM
+  NOE
+  DERATISATION
+  DESINSECTISATION
+  DEBARRAS
+  OZONE
+  NEBULISATION
+  SCENE_DE_CRIME
+  DEVIS
+}
+
+enum JobStatus {
+  EN_ATTENTE
+  EN_COURS
+  TERMINE
+}
+
+enum AttachmentKind {
+  PHOTO
+  DOCUMENT
+}
+
+enum AuditEntityType {
+  JOB
+  STAFF
+  USER
+  ATTACHMENT
+  AUTH
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  ARCHIVE
+  RESTORE
+  LOGIN
+  LOGOUT
+  PASSWORD_RESET
+}
+
+model UserAccount {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(USER)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobItemsCreated  JobItem[] @relation("jobitem_created_by")
+  jobItemsArchived JobItem[] @relation("jobitem_archived_by")
+
+  attachmentsUploaded JobAttachment[] @relation("jobattachment_uploaded_by")
+
+  auditLogs AuditLog[] @relation("audit_actor_user")
+}
+
+model StaffMember {
+  id          String    @id @default(cuid())
+  firstName   String
+  lastName    String
+  email       String?   @unique
+  phoneNumber String?
+  role        StaffRole @default(TECHNICIEN)
+  notes       String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  jobLinks JobAssignment[]
+
+  @@index([lastName])
+  @@index([isActive])
+}
+
+model JobItem {
+  id     String    @id @default(cuid())
+  title  String
+  type   JobType
+  status JobStatus @default(EN_ATTENTE)
+
+  startAt DateTime
+  endAt   DateTime
+  
+  clientName    String? 
+  clientPhone   String?
+  clientEmail   String?
+  clientAddress String?
+  notes String?
+
+  siteAddress  String?
+  contactName  String?
+  contactPhone String?
+  contactEmail String?
+
+  createdById String
+  createdBy   UserAccount @relation("jobitem_created_by", fields: [createdById], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  archivedAt  DateTime?
+  archivedById String?
+  archivedBy   UserAccount? @relation("jobitem_archived_by", fields: [archivedById], references: [id], onDelete: SetNull)
+
+  archived Boolean @default(false)
+
+  staffLinks  JobAssignment[]
+  attachments JobAttachment[]
+  products    JobProductUsed[]
+
+  @@index([startAt])
+  @@index([endAt])
+  @@index([status])
+  @@index([archived])
+  @@index([archivedAt])
+  @@index([archivedById])
+}
+
+model JobAssignment {
+  id      String @id @default(cuid())
+  jobId   String
+  staffId String
+
+  job   JobItem     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  staff StaffMember @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, staffId])
+  @@index([jobId])
+  @@index([staffId])
+}
+
+model JobAttachment {
+  id    String         @id @default(cuid())
+  jobId String
+  kind  AttachmentKind @default(PHOTO)
+
+  fileLabel String
+  fileType  String
+  fileUrl   String
+
+  uploadedByUserId String?
+  uploadedByUser   UserAccount? @relation("jobattachment_uploaded_by", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  uploadedAt DateTime @default(now())
+
+  job JobItem @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([uploadedByUserId])
+  @@index([uploadedAt])
+}
+
+model JobProductUsed {
+  id    String @id @default(cuid())
+  jobId String
+
+  name     String
+  quantity Float?
+  unit     String?
+  notes    String?
+
+  createdAt DateTime @default(now())
+
+  job JobItem @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  actorUserId   String?
+  actorUsername String?
+
+  entityType AuditEntityType
+  entityId   String
+  action     AuditAction
+  before    String?
+  after     String?
+  ip        String?
+  userAgent String?
+
+  message String?
+  diff    Json?
+
+  actorUser UserAccount? @relation("audit_actor_user", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([action])
+}
