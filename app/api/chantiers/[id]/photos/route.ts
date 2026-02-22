@@ -2,39 +2,49 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { put } from "@vercel/blob";
 import { prisma } from "@/src/lib/prisma";
 import { requireWriteAccess } from "@/src/lib/rbac";
-import { put } from "@vercel/blob";
 
-type Ctx = { params: Promise<{ id: string }> };
+type Ctx = { params: { id: string } };
+
+function safeName(name: string) {
+  return (name || "photo")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9._-]/g, "");
+}
 
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireWriteAccess(req);
-    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
 
-    const { id: jobId } = await ctx.params;
+    const jobId = ctx.params.id;
 
     const form = await req.formData();
-    const keys = Array.from(form.keys());
 
-    // On accepte "files" (multi) et "file" (single)
-    const filesFromFiles = form.getAll("files").filter((x): x is File => x instanceof File);
-    const fileSingle = form.get("file");
+    // accepte soit "files" (multiple) soit "file" (single)
+    const filesFromFiles = form
+      .getAll("files")
+      .filter((x): x is File => x instanceof File);
+
+    const single = form.get("file");
     const files =
       filesFromFiles.length > 0
         ? filesFromFiles
-        : fileSingle instanceof File
-          ? [fileSingle]
+        : single instanceof File
+          ? [single]
           : [];
 
     if (files.length === 0) {
       return NextResponse.json(
         {
           error: "Missing file(s) in multipart/form-data",
-          receivedKeys: keys,
+          receivedKeys: Array.from(form.keys()),
           hint:
-            "Envoie un vrai File via FormData (fd.append('files', file) ou fd.append('file', file)) SANS fixer le header Content-Type.",
+            "Attendu: fd.append('files', file) (ou 'file') et ne PAS forcer Content-Type côté client.",
         },
         { status: 400 }
       );
@@ -45,24 +55,24 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const created = [];
 
     for (const file of files) {
-      // Upload dans Vercel Blob
-      const safeName = (file.name || "photo").replace(/\s+/g, "_");
-      const blobPath = `phoenix/${jobId}/${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
+      // Upload vers Vercel Blob (pas de filesystem)
+      const blob = await put(
+        `phoenix/${jobId}/${Date.now()}-${safeName(file.name)}`,
+        file,
+        {
+          access: "public",
+          addRandomSuffix: true,
+          contentType: file.type || "application/octet-stream",
+        }
+      );
 
-      const blob = await put(blobPath, file, {
-        access: "public", // pour pouvoir afficher directement dans l'app
-        contentType: file.type || "application/octet-stream",
-        addRandomSuffix: false,
-      });
-
-      // En base : on stocke une URL blob publique
       const attachment = await prisma.jobAttachment.create({
         data: {
           jobId,
           kind: kind as any,
-          fileLabel: file.name,
+          fileLabel: file.name || "photo",
           fileType: file.type || "application/octet-stream",
-          fileUrl: blob.url, // <-- IMPORTANT : URL blob
+          fileUrl: blob.url, // ✅ URL Blob
           uploadedByUserId: auth.userId,
         },
       });

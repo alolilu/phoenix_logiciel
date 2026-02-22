@@ -308,28 +308,25 @@ async function fetchPhotos(jobId: string): Promise<PhotoDTO[]> {
   return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, { method: "GET" });
 }
 
-async function uploadPhotos(jobId: string, files: File[]) {
+async function uploadPhotos(jobId: string, files: File[]): Promise<PhotoDTO[]> {
   const fd = new FormData();
 
   for (const f of files) {
     fd.append("files", f);
   }
 
-  const res = await fetch(
-    `/api/chantiers/${encodeURIComponent(jobId)}/photos`,
-    {
-      method: "POST",
-      body: fd,
-      // ⚠️ surtout PAS de headers
-    }
-  );
+  const res = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
+    method: "POST",
+    body: fd,
+    // surtout PAS de headers Content-Type
+  });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text);
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Erreur upload (${res.status})`);
   }
 
-  return res.json();
+  return (await res.json()) as PhotoDTO[];
 }
 
 /** ---------- UI Components ---------- */
@@ -1253,75 +1250,106 @@ export default function Page() {
           </div>
 
           {/* ✅ Photos chantier */}
-          <div className="rounded-2xl border bg-white p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="font-semibold">Photos du chantier</div>
+<div className="rounded-2xl border bg-white p-5">
+  <div className="flex items-center justify-between gap-3">
+    <div className="font-semibold">Photos du chantier</div>
 
-              <div className="flex items-center gap-2">
-                <input
-  type="file"
-  multiple
-  accept="image/*"
-  onChange={(e) => {
-    if (!e.target.files) return;
-    if (!editingId) return; // sécurité
-    uploadPhotos(editingId, Array.from(e.target.files));
-  }}
-/>
-                <button
-                  type="button"
-                  className={`rounded-xl px-3 py-2 text-sm font-semibold ${FOREST_BTN}`}
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={photosLoading || saving}
-                  title="Prendre / ajouter des photos"
-                >
-                  + Photo
-                </button>
+    {/* Input caché déclenché par le bouton */}
+    <input
+      ref={fileInputRef}
+      type="file"
+      multiple
+      accept="image/*"
+      style={{ display: "none" }}
+      onChange={async (e) => {
+        const files = e.currentTarget.files ? Array.from(e.currentTarget.files) : [];
 
-                {editingId ? (
-                  <button
-                    type="button"
-                    className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50"
-                    onClick={() => refreshPhotos(editingId)}
-                    disabled={photosLoading}
-                    title="Rafraîchir la liste"
-                  >
-                    {photosLoading ? "…" : "Rafraîchir"}
-                  </button>
-                ) : null}
-              </div>
-            </div>
+        if (!editingId) {
+          window.alert("Enregistre d’abord le chantier, puis ajoute les photos.");
+          e.currentTarget.value = "";
+          return;
+        }
+        if (files.length === 0) return;
 
-            {!editingId ? (
-              <div className="mt-2 text-sm text-slate-600">Enregistre le chantier une première fois pour pouvoir associer des photos.</div>
-            ) : photosLoading ? (
-              <div className="mt-3 text-sm text-slate-600">Chargement photos…</div>
-            ) : photos.length === 0 ? (
-              <div className="mt-3 text-sm text-slate-600">Aucune photo.</div>
-            ) : (
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                {photos.map((p) => (
-                  <a key={p.id} href={p.fileUrl} target="_blank" rel="noreferrer" className="block rounded-xl border overflow-hidden hover:opacity-90">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.fileUrl} alt={p.fileLabel} className="h-28 w-full object-cover" />
-                  </a>
-                ))}
-              </div>
-            )}
+        setError(null);
+        setPhotosLoading(true);
 
-            {editingId ? (
-              <div className="mt-4 flex items-center justify-end">
-                <button
-                  type="button"
-                  className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50"
-                  onClick={() => openPdf(editingId)}
-                  disabled={saving}
-                >
-                  Ouvrir PDF
-                </button>
-              </div>
-            ) : null}
-          </div>
+        try {
+          const uploaded = await uploadPhotos(editingId, files);
+          setPhotos(uploaded);
+          e.currentTarget.value = "";
+        } catch (err: any) {
+          setError(err?.message ?? "Erreur upload photos");
+          e.currentTarget.value = "";
+        } finally {
+          setPhotosLoading(false);
+        }
+      }}
+    />
+
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        className={`rounded-xl px-3 py-2 text-sm font-semibold ${FOREST_BTN}`}
+        onClick={() => fileInputRef.current?.click()}
+        disabled={photosLoading || saving || !editingId}
+        title={!editingId ? "Enregistre le chantier d’abord" : "Prendre / ajouter des photos"}
+      >
+        + Photo
+      </button>
+
+      <button
+        type="button"
+        className="rounded-xl border px-3 py-2 text-sm font-semibold"
+        onClick={() => {
+          if (!editingId) return;
+          refreshPhotos(editingId);
+        }}
+        disabled={photosLoading || !editingId}
+      >
+        Rafraîchir
+      </button>
+    </div>
+  </div>
+
+  {!editingId ? (
+    <div className="mt-2 text-sm text-slate-600">
+      Enregistre le chantier une première fois pour pouvoir associer des photos.
+    </div>
+  ) : photosLoading ? (
+    <div className="mt-3 text-sm text-slate-600">Chargement / upload photos…</div>
+  ) : photos.length === 0 ? (
+    <div className="mt-3 text-sm text-slate-600">Aucune photo.</div>
+  ) : (
+    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+      {photos.map((p) => (
+        <a
+          key={p.id}
+          href={p.fileUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block rounded-xl border overflow-hidden hover:opacity-90"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={p.fileUrl} alt={p.fileLabel} className="h-28 w-full object-cover" />
+        </a>
+      ))}
+    </div>
+  )}
+
+  {editingId ? (
+    <div className="mt-4 flex items-center justify-end">
+      <button
+        type="button"
+        className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+        onClick={() => openPdf(editingId)}
+        disabled={saving}
+      >
+        Ouvrir PDF
+      </button>
+    </div>
+  ) : null}
+</div>
 
           {/* actions */}
           <div className="sticky bottom-0 bg-white border-t py-4">
