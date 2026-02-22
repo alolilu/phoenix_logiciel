@@ -5,6 +5,8 @@ import type { NextRequest } from "next/server";
 import { put } from "@vercel/blob";
 import { prisma } from "@/src/lib/prisma";
 import { requireWriteAccess } from "@/src/lib/rbac";
+import path from "path";
+import { mkdir, writeFile } from "fs/promises";
 
 type Ctx = { params: { id: string } };
 
@@ -17,62 +19,61 @@ function safeName(name: string) {
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireWriteAccess(req);
-    if (!auth.ok) {
+    if (!auth.ok)
       return NextResponse.json({ error: auth.error }, { status: auth.status });
-    }
 
-    const jobId = ctx.params.id;
+    const { id: jobId } = await ctx.params;
 
     const form = await req.formData();
 
-    // accepte soit "files" (multiple) soit "file" (single)
+    // accepte "files" (multiple) OU "file" (single)
     const filesFromFiles = form
       .getAll("files")
-      .filter((x): x is File => x instanceof File);
+      .filter((f): f is File => f instanceof File);
 
     const single = form.get("file");
     const files =
       filesFromFiles.length > 0
         ? filesFromFiles
         : single instanceof File
-          ? [single]
-          : [];
+        ? [single]
+        : [];
 
     if (files.length === 0) {
       return NextResponse.json(
         {
-          error: "Missing file(s) in multipart/form-data",
+          error: "Missing file (multipart/form-data: file)",
           receivedKeys: Array.from(form.keys()),
-          hint:
-            "Attendu: fd.append('files', file) (ou 'file') et ne PAS forcer Content-Type côté client.",
         },
         { status: 400 }
       );
     }
 
-    const kind = (form.get("kind") as string) ?? "PHOTO";
+    const uploadDir = path.join(process.cwd(), "public", "uploads");
+    await mkdir(uploadDir, { recursive: true });
 
     const created = [];
 
     for (const file of files) {
-      // Upload vers Vercel Blob (pas de filesystem)
-      const blob = await put(
-        `phoenix/${jobId}/${Date.now()}-${safeName(file.name)}`,
-        file,
-        {
-          access: "public",
-          addRandomSuffix: true,
-          contentType: file.type || "application/octet-stream",
-        }
-      );
+      const buffer = Buffer.from(await file.arrayBuffer());
+
+      const safeName = (file.name || "photo").replace(/\s+/g, "_");
+      const fileName = `${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}-${safeName}`;
+
+      const filePath = path.join(uploadDir, fileName);
+      await writeFile(filePath, buffer);
+
+      const fileUrl = `/uploads/${fileName}`;
 
       const attachment = await prisma.jobAttachment.create({
         data: {
           jobId,
-          kind: kind as any,
-          fileLabel: file.name || "photo",
+          kind: "PHOTO",
+          fileLabel: file.name,
           fileType: file.type || "application/octet-stream",
-          fileUrl: blob.url, // ✅ URL Blob
+          fileUrl,
           uploadedByUserId: auth.userId,
         },
       });
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return NextResponse.json(created);
   } catch (e: any) {
     return NextResponse.json(
-      { error: e?.message ?? "Erreur serveur photos" },
+      { error: e?.message ?? "Erreur upload photos" },
       { status: 500 }
     );
   }
