@@ -131,8 +131,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   .filter((s: string): s is string => Boolean(s));
 
     const photos = (job.attachments || [])
-      .map((a) => ({ url: a.fileUrl, type: a.fileType, label: a.fileLabel }))
-      .filter((p) => p.type === "image/jpeg" || p.type === "image/jpg" || p.type === "image/png");
+  .map((a: { fileUrl: string; fileType: string; fileLabel: string }) => ({
+    url: a.fileUrl,
+    type: a.fileType,
+    label: a.fileLabel,
+  }))
+  .filter(
+    (p: { type: string }) =>
+      p.type === "image/jpeg" || p.type === "image/jpg" || p.type === "image/png"
+  );
 
     const { client, restNotes } = extractClientBlock(String(job.notes || ""));
 
