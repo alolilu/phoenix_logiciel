@@ -125,8 +125,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const endISO = toISODateUTC(new Date(job.endAt));
 
     const intervenants = (job.staffLinks || [])
-      .map((l) => `${l.staff?.firstName ?? ""} ${l.staff?.lastName ?? ""}`.trim())
-      .filter(Boolean);
+  .map((l: { staff?: { firstName?: string | null; lastName?: string | null } | null }) =>
+    `${l.staff?.firstName ?? ""} ${l.staff?.lastName ?? ""}`.trim()
+  )
+  .filter((s): s is string => Boolean(s));
 
     const photos = (job.attachments || [])
       .map((a) => ({ url: a.fileUrl, type: a.fileType, label: a.fileLabel }))
