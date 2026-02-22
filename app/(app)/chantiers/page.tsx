@@ -1,5 +1,4 @@
 "use client";
-
 import React, { useState, useRef, useEffect } from "react";
 
 export default function ChantiersPage() {
@@ -8,8 +7,6 @@ export default function ChantiersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [photos, setPhotos] = useState<any[]>([]);
-  const [formTitle, setFormTitle] = useState("");
-  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
@@ -21,42 +18,33 @@ export default function ChantiersPage() {
 
   const openEdit = async (ev: any) => {
     setEditingId(ev.id);
-    setFormTitle(ev.title);
     setModalOpen(true);
     setPhotos([]); 
-    try {
-      const res = await fetch(`/api/chantiers/${ev.id}/photos`);
-      if (res.ok) setPhotos(await res.json());
-    } catch (err) {
-      console.error("Erreur photos");
-    }
+    const res = await fetch(`/api/chantiers/${ev.id}/photos`);
+    if (res.ok) setPhotos(await res.json());
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
-    if (files.length === 0 || !editingId) return;
+    if (!files.length || !editingId) return;
 
     setUploading(true);
     try {
       for (const file of files) {
-        const formData = new FormData();
-        formData.append("file", file); // Clé "file" identique à l'API
+        const fd = new FormData();
+        fd.append("file", file); // CLE "file" IMPERATIVE
 
         const res = await fetch(`/api/chantiers/${editingId}/photos`, {
           method: "POST",
-          body: formData, // On laisse le navigateur gérer le Content-Type
+          body: fd,
         });
 
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || "Erreur upload");
-        }
-
-        const newPhoto = await res.json();
-        setPhotos((prev) => [newPhoto, ...prev]);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Erreur 400");
+        setPhotos(prev => [data, ...prev]);
       }
     } catch (err: any) {
-      alert("Erreur : " + err.message);
+      alert("Erreur upload: " + err.message);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -64,51 +52,38 @@ export default function ChantiersPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <header className="flex justify-between items-center bg-white p-5 rounded-2xl shadow-sm border">
-          <h1 className="text-xl font-black text-[#183536]">PHOENIX</h1>
-          <button onClick={() => { setEditingId(null); setModalOpen(true); }} className="bg-[#183536] text-white px-6 py-2 rounded-xl font-bold">
-            + NOUVEAU
-          </button>
-        </header>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {events.map((ev) => (
-            <div key={ev.id} onClick={() => openEdit(ev)} className="bg-white p-5 rounded-2xl border shadow-sm cursor-pointer hover:border-emerald-500">
-              <h3 className="font-bold">{ev.title}</h3>
-            </div>
-          ))}
-        </div>
+    <div className="p-8">
+      <div className="grid gap-4">
+        {events.map(ev => (
+          <div key={ev.id} onClick={() => openEdit(ev)} className="p-4 bg-white border rounded shadow-sm cursor-pointer">
+            {ev.title}
+          </div>
+        ))}
       </div>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl p-6 space-y-6">
-            <div className="flex justify-between items-center border-b pb-4">
-              <h2 className="text-lg font-black">{formTitle || "Nouveau"}</h2>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+            <div className="flex justify-between mb-4">
+              <h2 className="font-bold">Photos du chantier</h2>
               <button onClick={() => setModalOpen(false)}>✕</button>
             </div>
+            
+            <input type="file" ref={fileInputRef} className="hidden" multiple onChange={handleUpload} />
+            
+            <button 
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full bg-emerald-600 text-white py-2 rounded-lg font-bold disabled:bg-slate-300"
+            >
+              {uploading ? "UPLOAD EN COURS..." : "+ AJOUTER DES PHOTOS"}
+            </button>
 
-            <div className="bg-slate-50 p-5 rounded-2xl border-2 border-dashed border-slate-200">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-xs font-black uppercase text-slate-500">Photos</h3>
-                <button 
-                  disabled={!editingId || uploading}
-                  onClick={() => fileInputRef.current?.click()}
-                  className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold"
-                >
-                  {uploading ? "UPLOAD..." : "+ AJOUTER"}
-                </button>
-              </div>
-              <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/*" onChange={handleUpload} />
-              <div className="grid grid-cols-3 gap-2">
-                {photos.map((p) => (
-                  <img key={p.id} src={p.fileUrl} className="aspect-square w-full object-cover rounded-xl border" />
-                ))}
-              </div>
+            <div className="grid grid-cols-3 gap-2 mt-4 max-h-60 overflow-y-auto">
+              {photos.map(p => (
+                <img key={p.id} src={p.fileUrl} className="w-full aspect-square object-cover rounded-lg border" />
+              ))}
             </div>
-            <button onClick={() => setModalOpen(false)} className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold">FERMER</button>
           </div>
         </div>
       )}

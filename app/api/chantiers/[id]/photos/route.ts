@@ -7,55 +7,56 @@ export const runtime = "nodejs";
 
 export async function POST(req: Request, ctx: any) {
   try {
-    // 1. Vérification des accès
     const auth = await requireWriteAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    // 2. Récupération de l'ID du chantier
-    const { id: jobId } = await ctx.params;
+    const params = await ctx.params;
+    const jobId = params.id;
     
-    // 3. Extraction du fichier du FormData
     const formData = await req.formData();
-    // On vérifie "file" et "files" pour être ultra-sécurisé
-    const file = (formData.get("file") || formData.get("files")) as File;
+    // On essaye de récupérer 'file' (minuscule) qui est le standard
+    const file = formData.get("file") as File;
 
-    if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "Missing file (multipart/form-data: file)" }, { status: 400 });
+    if (!file) {
+      console.error("ERREUR 400: Aucun fichier trouvé dans le FormData. Clés reçues:", Array.from(formData.keys()));
+      return NextResponse.json({ error: "Fichier manquant dans la requête" }, { status: 400 });
     }
 
-    // 4. Upload vers Vercel Blob (Indispensable pour le déploiement)
-    const blob = await put(file.name, file, {
-      access: "public",
-    });
+    // Vérification de la présence du Token Vercel Blob
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      console.error("ERREUR 500: BLOB_READ_WRITE_TOKEN manquant.");
+      return NextResponse.json({ error: "Configuration Storage manquante sur Vercel" }, { status: 500 });
+    }
 
-    // 5. Enregistrement dans la base Néon via Prisma
+    const blob = await put(file.name, file, { access: "public" });
+
     const attachment = await prisma.jobAttachment.create({
       data: {
         jobId,
         kind: "PHOTO",
         fileLabel: file.name,
         fileType: file.type || "image/jpeg",
-        fileUrl: blob.url, // L'URL publique Vercel
+        fileUrl: blob.url,
         uploadedByUserId: auth.userId,
       },
     });
 
     return NextResponse.json(attachment);
   } catch (e: any) {
-    console.error("Erreur API Upload:", e);
+    console.error("CRASH API PHOTOS:", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
 export async function GET(req: Request, ctx: any) {
   try {
-    const { id: jobId } = await ctx.params;
+    const params = await ctx.params;
     const photos = await prisma.jobAttachment.findMany({
-      where: { jobId, kind: "PHOTO" },
+      where: { jobId: params.id, kind: "PHOTO" },
       orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(photos);
   } catch (e: any) {
-    return NextResponse.json({ error: "Erreur lors du chargement" }, { status: 500 });
+    return NextResponse.json({ error: "Erreur chargement" }, { status: 500 });
   }
 }
