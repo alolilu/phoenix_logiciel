@@ -14,18 +14,23 @@ export async function POST(req: Request, ctx: any) {
     const jobId = params.id;
     
     const formData = await req.formData();
-    // On essaye de récupérer 'file' (minuscule) qui est le standard
+    
+    // On essaie de récupérer le fichier avec la clé "file"
     const file = formData.get("file") as File;
 
     if (!file) {
-      console.error("ERREUR 400: Aucun fichier trouvé dans le FormData. Clés reçues:", Array.from(formData.keys()));
-      return NextResponse.json({ error: "Fichier manquant dans la requête" }, { status: 400 });
+      // Si on ne trouve pas "file", on regarde toutes les clés reçues pour aider au débug
+      const receivedKeys = Array.from(formData.keys());
+      console.error("Clés reçues par l'API:", receivedKeys);
+      return NextResponse.json({ 
+        error: "Missing file (multipart/form-data: file)",
+        debug_recu: receivedKeys 
+      }, { status: 400 });
     }
 
-    // Vérification de la présence du Token Vercel Blob
+    // Vérification de la configuration Vercel
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      console.error("ERREUR 500: BLOB_READ_WRITE_TOKEN manquant.");
-      return NextResponse.json({ error: "Configuration Storage manquante sur Vercel" }, { status: 500 });
+      return NextResponse.json({ error: "Config Vercel Blob manquante" }, { status: 500 });
     }
 
     const blob = await put(file.name, file, { access: "public" });
@@ -43,7 +48,7 @@ export async function POST(req: Request, ctx: any) {
 
     return NextResponse.json(attachment);
   } catch (e: any) {
-    console.error("CRASH API PHOTOS:", e);
+    console.error("Crash API Photos:", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
