@@ -128,7 +128,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   .map((l: { staff?: { firstName?: string | null; lastName?: string | null } | null }) =>
     `${l.staff?.firstName ?? ""} ${l.staff?.lastName ?? ""}`.trim()
   )
-  .filter((s): s is string => Boolean(s));
+  .filter((s: string): s is string => Boolean(s));
 
     const photos = (job.attachments || [])
       .map((a) => ({ url: a.fileUrl, type: a.fileType, label: a.fileLabel }))
