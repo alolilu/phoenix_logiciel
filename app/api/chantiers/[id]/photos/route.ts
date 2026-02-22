@@ -1,59 +1,61 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
 import { put } from "@vercel/blob"; 
 import { prisma } from "@/src/lib/prisma";
 import { requireWriteAccess } from "@/src/lib/rbac";
 
-export async function POST(req: NextRequest, ctx: any) {
+export const runtime = "nodejs";
+
+export async function POST(req: Request, ctx: any) {
   try {
-    // 1. Vérification accès
+    // 1. Vérification des accès
     const auth = await requireWriteAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
+    // 2. Récupération de l'ID du chantier
     const { id: jobId } = await ctx.params;
-    const form = await req.formData();
     
-    // On extrait le fichier envoyé sous la clé "file"
-    const file = form.get("file") as File;
-    if (!file) {
-      return NextResponse.json({ error: "Fichier manquant dans le formulaire" }, { status: 400 });
+    // 3. Extraction du fichier du FormData
+    const formData = await req.formData();
+    // On vérifie "file" et "files" pour être ultra-sécurisé
+    const file = (formData.get("file") || formData.get("files")) as File;
+
+    if (!file || !(file instanceof File)) {
+      return NextResponse.json({ error: "Missing file (multipart/form-data: file)" }, { status: 400 });
     }
 
-    // 2. Upload direct vers Vercel Blob (Cloud)
-    // Cela génère une URL publique (https://...public.blob.vercel-storage.com/...)
+    // 4. Upload vers Vercel Blob (Indispensable pour le déploiement)
     const blob = await put(file.name, file, {
       access: "public",
     });
 
-    // 3. Enregistrement en base de données Néon
+    // 5. Enregistrement dans la base Néon via Prisma
     const attachment = await prisma.jobAttachment.create({
       data: {
         jobId,
         kind: "PHOTO",
         fileLabel: file.name,
         fileType: file.type || "image/jpeg",
-        fileUrl: blob.url, 
+        fileUrl: blob.url, // L'URL publique Vercel
         uploadedByUserId: auth.userId,
       },
     });
 
     return NextResponse.json(attachment);
   } catch (e: any) {
-    console.error("Erreur API Photos:", e);
+    console.error("Erreur API Upload:", e);
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-// Route pour récupérer les photos existantes
-export async function GET(req: NextRequest, ctx: any) {
+export async function GET(req: Request, ctx: any) {
   try {
     const { id: jobId } = await ctx.params;
     const photos = await prisma.jobAttachment.findMany({
       where: { jobId, kind: "PHOTO" },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
     return NextResponse.json(photos);
   } catch (e: any) {
-    return NextResponse.json({ error: "Impossible de charger les photos" }, { status: 500 });
+    return NextResponse.json({ error: "Erreur lors du chargement" }, { status: 500 });
   }
 }
