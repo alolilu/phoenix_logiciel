@@ -308,22 +308,28 @@ async function fetchPhotos(jobId: string): Promise<PhotoDTO[]> {
   return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, { method: "GET" });
 }
 
-async function uploadPhotos(jobId: string, files: File[]): Promise<PhotoDTO[]> {
+async function uploadPhotos(jobId: string, files: File[]) {
   const fd = new FormData();
-  for (const f of files) fd.append("files", f); // multi
-  fd.append("kind", "PHOTO");
 
-  const res = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
-    method: "POST",
-    body: fd,
-    // ⚠️ NE PAS mettre de headers Content-Type ici
-  });
-
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json?.error ?? "Upload photos échoué");
+  for (const f of files) {
+    fd.append("files", f);
   }
-  return json as PhotoDTO[];
+
+  const res = await fetch(
+    `/api/chantiers/${encodeURIComponent(jobId)}/photos`,
+    {
+      method: "POST",
+      body: fd,
+      // ⚠️ surtout PAS de headers
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text);
+  }
+
+  return res.json();
 }
 
 /** ---------- UI Components ---------- */
@@ -1253,15 +1259,15 @@ export default function Page() {
 
               <div className="flex items-center gap-2">
                 <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  multiple
-                  className="hidden"
-                  onChange={(e) => handlePickPhotos(e.target.files)}
-                />
-
+  type="file"
+  multiple
+  accept="image/*"
+  onChange={(e) => {
+    if (!e.target.files) return;
+    if (!editingId) return; // sécurité
+    uploadPhotos(editingId, Array.from(e.target.files));
+  }}
+/>
                 <button
                   type="button"
                   className={`rounded-xl px-3 py-2 text-sm font-semibold ${FOREST_BTN}`}
