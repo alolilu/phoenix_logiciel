@@ -1,134 +1,74 @@
 export const runtime = "nodejs";
 
-import { NextRequest, NextResponse } from "next/server";
-import path from "node:path";
-import fs from "node:fs/promises";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { writeFile, mkdir } from "fs/promises";
+import path from "path";
 import { prisma } from "@/src/lib/prisma";
 import { requireWriteAccess } from "@/src/lib/rbac";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-function safeExtFromMimeOrName(mime: string, name: string) {
-  const m = (mime || "").toLowerCase();
-  const n = (name || "").toLowerCase();
-
-  if (m.includes("png") || n.endsWith(".png")) return "png";
-  if (m.includes("jpeg") || m.includes("jpg") || n.endsWith(".jpg") || n.endsWith(".jpeg")) return "jpg";
-  if (m.includes("webp") || n.endsWith(".webp")) return "webp";
-
-  return "jpg";
-}
-
-function normalizeMime(mime: string, ext: string) {
-  const m = (mime || "").toLowerCase();
-  if (m.startsWith("image/")) return m;
-
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  return "image/jpeg";
-}
-
-// ✅ Extraction safe de l'userId sans dépendre du typage de requireWriteAccess
-function getUserIdFromAuth(auth: unknown): string | null {
-  const a = auth as any;
-  const id =
-    a?.user?.id ??
-    a?.userId ??
-    a?.session?.user?.id ??
-    null;
-
-  return id ? String(id) : null;
-}
-
-/**
- * GET /api/chantiers/:id/photos
- */
-export async function GET(req: NextRequest, ctx: Ctx) {
-  try {
-    const auth = await requireWriteAccess(req);
-    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
-    const { id } = await ctx.params;
-
-    const photos = await prisma.jobAttachment.findMany({
-      where: { jobId: id, kind: "PHOTO" },
-      orderBy: { uploadedAt: "desc" },
-      select: {
-        id: true,
-        kind: true,
-        fileLabel: true,
-        fileType: true,
-        fileUrl: true,
-        uploadedByUserId: true,
-        uploadedAt: true,
-      },
-    });
-
-    return NextResponse.json(photos, { status: 200 });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Server error" }, { status: 500 });
-  }
-}
-
-/**
- * POST /api/chantiers/:id/photos
- * multipart/form-data (file)
- */
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const auth = await requireWriteAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const { id } = await ctx.params;
+    const { id: jobId } = await ctx.params;
 
     const form = await req.formData();
-    const file = form.get("file");
 
-    if (!file || !(file instanceof File)) {
-      return NextResponse.json({ error: "Missing file (multipart/form-data: file)" }, { status: 400 });
+    // ✅ On accepte plusieurs photos:
+    // - soit "files" (recommandé)
+    // - soit "file" (fallback)
+    const filesFromFiles = form.getAll("files").filter((x): x is File => x instanceof File);
+    const fileSingle = form.get("file");
+    const files =
+      filesFromFiles.length > 0
+        ? filesFromFiles
+        : fileSingle instanceof File
+        ? [fileSingle]
+        : [];
+
+    if (!jobId) return NextResponse.json({ error: "id (jobId) manquant dans l'URL" }, { status: 400 });
+    if (files.length === 0) {
+      return NextResponse.json({ error: "Missing file (multipart/form-data: files)" }, { status: 400 });
     }
 
-    const ext = safeExtFromMimeOrName(file.type || "", file.name || "");
-    const mime = normalizeMime(file.type || "", ext);
+    const kind = (form.get("kind") as string) ?? "PHOTO";
 
-    const bytes = Buffer.from(await file.arrayBuffer());
+    // ⚠️ Stockage actuel: filesystem (OK pour test, PAS fiable sur Vercel)
+    const uploadDir = path.join(process.cwd(), "public", "uploads");
+    await mkdir(uploadDir, { recursive: true });
 
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `photo_${stamp}.${ext}`;
+    const created = [];
 
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "chantiers", id);
-    await fs.mkdir(uploadDir, { recursive: true });
+    for (const file of files) {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const safeName = (file.name || "photo").replace(/\s+/g, "_");
+      const fileName = `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeName}`;
+      const filePath = path.join(uploadDir, fileName);
 
-    const absPath = path.join(uploadDir, filename);
-    await fs.writeFile(absPath, bytes);
+      await writeFile(filePath, buffer);
 
-    const fileUrl = `/uploads/chantiers/${id}/${filename}`;
+      const fileUrl = `/uploads/${fileName}`;
 
-    // ✅ plus de rouge : on ne touche pas auth.user directement
-    const uploaderId = getUserIdFromAuth(auth);
+      const attachment = await prisma.jobAttachment.create({
+        data: {
+          jobId,
+          kind: kind as any,
+          fileLabel: file.name,
+          fileType: file.type || "application/octet-stream",
+          fileUrl,
+          uploadedByUserId: auth.userId,
+        },
+      });
 
-    const created = await prisma.jobAttachment.create({
-      data: {
-        jobId: id,
-        kind: "PHOTO",
-        fileLabel: file.name ? String(file.name) : filename,
-        fileType: mime,
-        fileUrl,
-        uploadedByUserId: uploaderId,
-      },
-      select: {
-        id: true,
-        kind: true,
-        fileLabel: true,
-        fileType: true,
-        fileUrl: true,
-        uploadedByUserId: true,
-        uploadedAt: true,
-      },
-    });
+      created.push(attachment);
+    }
 
-    return NextResponse.json({ ok: true, attachment: created }, { status: 201 });
+    return NextResponse.json(created);
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Upload failed" }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? "Erreur serveur photos" }, { status: 500 });
   }
 }

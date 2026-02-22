@@ -310,15 +310,20 @@ async function fetchPhotos(jobId: string): Promise<PhotoDTO[]> {
 
 async function uploadPhotos(jobId: string, files: File[]): Promise<PhotoDTO[]> {
   const fd = new FormData();
-  for (const f of files) {
-    // compat: certains backends attendent "file", d’autres "files"
-    fd.append("file", f);
-    fd.append("files", f);
-  }
-  return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
+  for (const f of files) fd.append("files", f); // multi
+  fd.append("kind", "PHOTO");
+
+  const res = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
     method: "POST",
     body: fd,
+    // ⚠️ NE PAS mettre de headers Content-Type ici
   });
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json?.error ?? "Upload photos échoué");
+  }
+  return json as PhotoDTO[];
 }
 
 /** ---------- UI Components ---------- */
