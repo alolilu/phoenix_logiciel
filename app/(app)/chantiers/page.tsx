@@ -68,7 +68,7 @@ interface GridProps {
 
 /** ---------- Utils & Helpers ---------- */
 
-const FOREST_BTN = "bg-[#183536] text-white hover:bg-[#122a2b] transition-colors";
+const FOREST_BTN = "bg-[#183536] text-white hover:bg-[#122a2b] transition-colors disabled:opacity-50";
 
 function pad2(n: number) { return String(n).padStart(2, "0"); }
 function toISODate(d: Date) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
@@ -103,7 +103,7 @@ function isTodayISO(iso: string) { return iso === toISODate(startOfDay(new Date(
 const CHANTIER_COLORS: Record<string, string> = {
   diogene: "#C46A1A",
   "post-mortem": "#8B1E1E",
-  "scene de crime": "#1F2937",
+  "scene-de-crime": "#1F2937",
   insalubre: "#7C2D12",
   debarras: "#2563EB",
   deratisation: "#4C1D95",
@@ -116,7 +116,7 @@ function getChantierColor(typeLabel: string) {
   return CHANTIER_COLORS[key] ?? "#334155";
 }
 
-/** Client Data Parsing */
+/** Gestion des blocs clients dans les notes */
 const CLIENT_START = "[[CLIENT]]";
 const CLIENT_END = "[[/CLIENT]]";
 
@@ -151,14 +151,21 @@ function buildNotesWithClient(client: ClientInfo, rest: string) {
 
 async function apiJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
-  if (!res.ok) throw new Error(`Erreur API: ${res.status}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Erreur inconnue" }));
+    throw new Error(err.error || `Erreur API: ${res.status}`);
+  }
   return res.json();
 }
 
 async function uploadPhotos(jobId: string, files: File[]): Promise<PhotoDTO[]> {
   const fd = new FormData();
-  files.forEach(f => fd.append("file", f));
-  return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, { method: "POST", body: fd });
+  // Utilise "files" (pluriel) car votre API fait form.getAll("files")
+  files.forEach(f => fd.append("files", f));
+  return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, { 
+    method: "POST", 
+    body: fd 
+  });
 }
 
 /** ---------- UI Components ---------- */
@@ -207,7 +214,7 @@ function DroppableDayCell({ iso, dayNumber, faded, children, onClick }: { iso: s
       className={`min-h-[110px] border p-1 transition-all ${faded ? "bg-slate-50/50 opacity-50" : "bg-white"} ${isOver ? "bg-blue-50 ring-2 ring-blue-200 ring-inset" : ""} ${today ? "bg-amber-50/30" : ""}`}
     >
       <div className={`text-right text-[11px] font-bold mb-1 ${today ? "text-[#183536]" : "text-slate-400"}`}>
-        {today ? "Aujourd'hui " : ""}{dayNumber}
+        {dayNumber}
       </div>
       <div className="space-y-1">{children}</div>
     </div>
@@ -221,6 +228,7 @@ export default function Page() {
   const [cursor] = useState<Date>(new Date());
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Form states
   const [formTitle, setFormTitle] = useState("");
@@ -266,7 +274,7 @@ export default function Page() {
     setClient(c);
     setFormNotes(rest);
     setModalOpen(true);
-    // Charger les photos
+    // Charger les photos existantes
     try {
       const p = await apiJSON<PhotoDTO[]>(`/api/chantiers/${ev.id}/photos`);
       setPhotos(p);
@@ -279,8 +287,19 @@ export default function Page() {
     const payload = { title: formTitle, type: formType, startDate: formStart, endDate: formEnd, status: formStatus, notes };
     
     try {
-      if (editingId) await apiJSON(`/api/chantiers/${editingId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      else await apiJSON("/api/chantiers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (editingId) {
+        await apiJSON(`/api/chantiers/${editingId}`, { 
+          method: "PUT", 
+          headers: { "Content-Type": "application/json" }, 
+          body: JSON.stringify(payload) 
+        });
+      } else {
+        await apiJSON("/api/chantiers", { 
+          method: "POST", 
+          headers: { "Content-Type": "application/json" }, 
+          body: JSON.stringify(payload) 
+        });
+      }
       setModalOpen(false);
       refresh();
     } catch (e) { alert("Erreur lors de la sauvegarde"); }
@@ -308,10 +327,8 @@ export default function Page() {
     <div className="p-6 bg-slate-100 min-h-screen">
       <div className="max-w-7xl mx-auto space-y-6">
         <header className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-          <div>
-            <h1 className="text-2xl font-black text-[#183536] tracking-tight">PHOENIX <span className="text-slate-400">PLANNING</span></h1>
-          </div>
-          <button onClick={() => openNew()} className={`px-6 py-2.5 rounded-xl font-bold shadow-lg shadow-emerald-900/10 ${FOREST_BTN}`}>
+          <h1 className="text-2xl font-black text-[#183536] tracking-tight">PHOENIX <span className="text-slate-400">PLANNING</span></h1>
+          <button onClick={() => openNew()} className={`px-6 py-2.5 rounded-xl font-bold ${FOREST_BTN}`}>
             + Nouveau chantier
           </button>
         </header>
@@ -332,17 +349,11 @@ export default function Page() {
       <Modal open={modalOpen} title={editingId ? "Détails du chantier" : "Création d'un chantier"} onClose={() => setModalOpen(false)}>
         <div className="space-y-6">
           <section className="space-y-3">
-            <label className="text-xs font-bold uppercase text-slate-400 tracking-wider">Informations générales</label>
-            <input className="w-full border-2 border-slate-100 p-3 rounded-xl focus:border-[#183536] outline-none transition-all font-medium" placeholder="Titre du chantier (ex: Nettoyage Diogène Dupont)" value={formTitle} onChange={e => setFormTitle(e.target.value)} />
+            <label className="text-xs font-bold uppercase text-slate-400">Informations générales</label>
+            <input className="w-full border-2 border-slate-100 p-3 rounded-xl focus:border-[#183536] outline-none font-medium" placeholder="Titre" value={formTitle} onChange={e => setFormTitle(e.target.value)} />
             <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold ml-1">Début</span>
-                <input type="date" className="w-full border-2 border-slate-100 p-2.5 rounded-xl text-sm" value={formStart} onChange={e => setFormStart(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold ml-1">Fin</span>
-                <input type="date" className="w-full border-2 border-slate-100 p-2.5 rounded-xl text-sm" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
-              </div>
+              <input type="date" className="border-2 border-slate-100 p-2.5 rounded-xl text-sm" value={formStart} onChange={e => setFormStart(e.target.value)} />
+              <input type="date" className="border-2 border-slate-100 p-2.5 rounded-xl text-sm" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
             </div>
             <select className="w-full border-2 border-slate-100 p-3 rounded-xl bg-white text-sm font-semibold" value={formType} onChange={e => setFormType(e.target.value as ChantierType)}>
               {CHANTIER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
@@ -350,42 +361,56 @@ export default function Page() {
           </section>
 
           <section className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-3">
-            <label className="text-xs font-bold uppercase text-slate-400 tracking-wider">Contact Client</label>
-            <input className="w-full border bg-white p-2.5 rounded-lg text-sm" placeholder="Nom complet" value={client.nom} onChange={e => setClient({...client, nom: e.target.value})} />
+            <label className="text-xs font-bold uppercase text-slate-400">Contact Client</label>
+            <input className="w-full border bg-white p-2.5 rounded-lg text-sm" placeholder="Nom" value={client.nom} onChange={e => setClient({...client, nom: e.target.value})} />
             <input className="w-full border bg-white p-2.5 rounded-lg text-sm" placeholder="Téléphone" value={client.tel} onChange={e => setClient({...client, tel: e.target.value})} />
-            <textarea className="w-full border bg-white p-2.5 rounded-lg text-sm min-h-[60px]" placeholder="Adresse complète" value={client.adresse} onChange={e => setClient({...client, adresse: e.target.value})} />
+            <textarea className="w-full border bg-white p-2.5 rounded-lg text-sm" placeholder="Adresse" value={client.adresse} onChange={e => setClient({...client, adresse: e.target.value})} />
           </section>
 
           <section className="space-y-3">
             <div className="flex justify-between items-center">
-              <label className="text-xs font-bold uppercase text-slate-400 tracking-wider">Galerie Photos</label>
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="text-[11px] font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full hover:bg-emerald-100">
-                + AJOUTER
+              <label className="text-xs font-bold uppercase text-slate-400">Galerie Photos</label>
+              <button 
+                type="button" 
+                disabled={uploading}
+                onClick={() => editingId ? fileInputRef.current?.click() : alert("Enregistrez le chantier d'abord")} 
+                className="text-[11px] font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {uploading ? "UPLOAD..." : "+ AJOUTER"}
               </button>
             </div>
+            
             <input 
-              type="file" multiple className="hidden" ref={fileInputRef} 
+              type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} 
               onChange={async (e) => {
-                if (!editingId) return alert("Veuillez d'abord enregistrer le chantier.");
-                const files = e.target.files ? Array.from(e.target.files) : [];
+                const selectedFiles = e.target.files ? Array.from(e.target.files) : [];
+                if (selectedFiles.length === 0 || !editingId) return;
+                setUploading(true);
                 try {
-                  const res = await uploadPhotos(editingId, files);
-                  setPhotos(res);
-                } catch { alert("Erreur upload"); }
-                if (fileInputRef.current) fileInputRef.current.value = "";
+                  const newPhotos = await uploadPhotos(editingId, selectedFiles);
+                  setPhotos(prev => [...prev, ...newPhotos]); // On ajoute les nouvelles aux anciennes
+                } catch (err: any) { alert(err.message); }
+                finally { 
+                  setUploading(false);
+                  if (fileInputRef.current) fileInputRef.current.value = ""; 
+                }
               }} 
             />
+            
             <div className="grid grid-cols-4 gap-2">
               {photos.map(p => (
-                <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden border bg-slate-200">
+                <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden border bg-slate-200 group">
                   <img src={p.fileUrl} className="object-cover w-full h-full" alt="chantier" />
+                  <a href={p.fileUrl} target="_blank" className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center">
+                    <span className="text-white opacity-0 group-hover:opacity-100 text-[9px] font-bold">VOIR</span>
+                  </a>
                 </div>
               ))}
             </div>
           </section>
 
           <button onClick={handleSave} className={`w-full py-4 rounded-2xl font-black text-sm uppercase tracking-widest shadow-xl shadow-emerald-900/20 ${FOREST_BTN}`}>
-            Enregistrer les modifications
+            Enregistrer
           </button>
         </div>
       </Modal>
@@ -406,31 +431,14 @@ function MonthGrid({ cursor, events, onCellClick, onEventClick, onMore }: GridPr
         const iso = toISODate(d);
         const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
         return (
-          <DroppableDayCell 
-            key={iso} 
-            iso={iso} 
-            dayNumber={d.getDate()} 
-            faded={d.getMonth() !== cursor.getMonth()} 
-            onClick={() => onCellClick(iso)}
-          >
+          <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={d.getMonth() !== cursor.getMonth()} onClick={() => onCellClick(iso)}>
             {dayEvents.slice(0, 3).map((e) => (
-              <DraggablePill 
-                key={e.id} 
-                draggableId={`${e.id}@${iso}`} 
-                style={{ backgroundColor: getChantierColor(e.type) }} 
-                onClick={() => onEventClick(e.id)}
-              >
+              <DraggablePill key={e.id} draggableId={`${e.id}@${iso}`} style={{ backgroundColor: getChantierColor(e.type) }} onClick={() => onEventClick(e.id)}>
                 {e.title}
               </DraggablePill>
             ))}
             {dayEvents.length > 3 && (
-              <div 
-                className="text-[9px] text-center font-black text-slate-400 pt-1 cursor-pointer hover:text-slate-600"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onMore) onMore(iso, (e.target as HTMLElement).getBoundingClientRect());
-                }}
-              >
+              <div className="text-[9px] text-center font-black text-slate-400 pt-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); if (onMore) onMore(iso, (e.target as HTMLElement).getBoundingClientRect()); }}>
                 + {dayEvents.length - 3} AUTRES
               </div>
             )}
