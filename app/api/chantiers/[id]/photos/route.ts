@@ -17,23 +17,30 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const { id: jobId } = await ctx.params;
 
     const form = await req.formData();
+    const keys = Array.from(form.keys());
 
-    // ✅ On accepte plusieurs photos:
-    // - soit "files" (recommandé)
-    // - soit "file" (fallback)
-    const filesFromFiles = form.getAll("files").filter((x): x is File => x instanceof File);
-    const fileSingle = form.get("file");
-    const files =
-      filesFromFiles.length > 0
-        ? filesFromFiles
-        : fileSingle instanceof File
-        ? [fileSingle]
-        : [];
+const filesFromFiles = form.getAll("files").filter((x): x is File => x instanceof File);
+const fileSingle = form.get("file");
+const files =
+  filesFromFiles.length > 0
+    ? filesFromFiles
+    : fileSingle instanceof File
+    ? [fileSingle]
+    : [];
 
-    if (!jobId) return NextResponse.json({ error: "id (jobId) manquant dans l'URL" }, { status: 400 });
-    if (files.length === 0) {
-      return NextResponse.json({ error: "Missing file (multipart/form-data: files)" }, { status: 400 });
-    }
+if (files.length === 0) {
+  return NextResponse.json(
+    {
+      error: "Missing file(s) in multipart/form-data",
+      receivedKeys: keys,
+      gotFilesCount: filesFromFiles.length,
+      gotFileIsFile: fileSingle instanceof File,
+      hint:
+        "Tu dois envoyer un vrai File via FormData (fd.append('files', file) ou fd.append('file', file)) SANS headers Content-Type.",
+    },
+    { status: 400 }
+  );
+}
 
     const kind = (form.get("kind") as string) ?? "PHOTO";
 
