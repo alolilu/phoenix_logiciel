@@ -58,7 +58,6 @@ interface GridProps {
   events: ChantierEvent[];
   onCellClick: (iso: string) => void;
   onEventClick: (id: string) => void;
-  onMore?: (iso: string, rect: DOMRect) => void;
 }
 
 /** ---------- Utils ---------- */
@@ -90,7 +89,6 @@ function getChantierColor(typeLabel: string) {
   return CHANTIER_COLORS[key] ?? "#334155";
 }
 
-/** Parsing Client */
 const CLIENT_START = "[[CLIENT]]";
 const CLIENT_END = "[[/CLIENT]]";
 
@@ -108,7 +106,7 @@ function extractClientBlock(notesRaw: string | undefined) {
     const key = (k || "").trim().toLowerCase();
     const val = vv.join("=").trim();
     if (key === "nom") client.nom = val;
-    else if (key === "tel" || key === "telephone") client.tel = val;
+    else if (key === "tel") client.tel = val;
     else if (key === "email") client.email = val;
     else if (key === "adresse") client.adresse = val;
   });
@@ -121,56 +119,7 @@ function buildNotesWithClient(client: ClientInfo, rest: string) {
   return `${CLIENT_START}\nNom=${client.nom}\nTel=${client.tel}\nEmail=${client.email}\nAdresse=${client.adresse}\n${CLIENT_END}\n\n${rest.trim()}`;
 }
 
-/** ---------- API ---------- */
-
-async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Erreur API");
-  return data;
-}
-
-/** ---------- UI Components ---------- */
-
-function Modal({ open, title, children, onClose }: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white w-full max-w-2xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="px-6 py-4 border-b flex justify-between items-center">
-          <h2 className="font-bold text-xl">{title}</h2>
-          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full">✕</button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-6">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function DraggablePill({ draggableId, style, children, onClick }: { draggableId: string; style?: CSSProperties; children: React.ReactNode; onClick: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: draggableId });
-  const dndStyle: CSSProperties | undefined = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
-  return (
-    <div ref={setNodeRef} style={dndStyle} className={isDragging ? "opacity-40 z-50" : "z-10"}>
-      <div style={style} className="w-full rounded-md px-2 py-1 text-[11px] font-bold cursor-grab text-white truncate" onClick={(e) => { e.stopPropagation(); onClick(); }} {...listeners} {...attributes}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function DroppableDayCell({ iso, dayNumber, faded, children, onClick }: { iso: string; dayNumber: number; faded: boolean; children: React.ReactNode; onClick: () => void }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `cell:${iso}` });
-  const today = isTodayISO(iso);
-  return (
-    <div ref={setNodeRef} onClick={onClick} className={`min-h-[110px] border p-1 transition-all ${faded ? "bg-slate-50 opacity-50" : "bg-white"} ${isOver ? "bg-blue-50" : ""} ${today ? "ring-2 ring-inset ring-[#183536]" : ""}`}>
-      <div className="text-right text-[11px] font-bold text-slate-400">{dayNumber}</div>
-      <div className="space-y-1">{children}</div>
-    </div>
-  );
-}
-
-/** ---------- Main Page ---------- */
+/** ---------- Page Principale ---------- */
 
 export default function Page() {
   const [events, setEvents] = useState<ChantierEvent[]>([]);
@@ -190,7 +139,8 @@ export default function Page() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
-    const data = await apiRequest<ChantierEvent[]>("/api/chantiers?archived=false");
+    const res = await fetch("/api/chantiers?archived=false");
+    const data = await res.json();
     setEvents(data);
   };
 
@@ -199,44 +149,61 @@ export default function Page() {
   const openEdit = async (ev: ChantierEvent) => {
     setEditingId(ev.id);
     setFormTitle(ev.title);
-    setFormType(ev.type);
+    setFormType(ev.type as ChantierType);
     setFormStart(ev.startDate);
     setFormEnd(ev.endDate);
     const { client: c, rest } = extractClientBlock(ev.notes);
     setClient(c); setFormNotes(rest);
     setModalOpen(true);
     try {
-      const p = await apiRequest<PhotoDTO[]>(`/api/chantiers/${ev.id}/photos`);
-      setPhotos(p);
+      const res = await fetch(`/api/chantiers/${ev.id}/photos`);
+      const p = await res.json();
+      setPhotos(Array.isArray(p) ? p : []);
     } catch { setPhotos([]); }
   };
 
   const handleSave = async () => {
     const notes = buildNotesWithClient(client, formNotes);
     const payload = { title: formTitle, type: formType, startDate: formStart, endDate: formEnd, notes };
-    if (editingId) await apiRequest(`/api/chantiers/${editingId}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-    else await apiRequest("/api/chantiers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+    const url = editingId ? `/api/chantiers/${editingId}` : "/api/chantiers";
+    await fetch(url, { 
+      method: editingId ? "PUT" : "POST", 
+      headers: { "Content-Type": "application/json" }, 
+      body: JSON.stringify(payload) 
+    });
     setModalOpen(false);
     refresh();
   };
 
-  // --- CORRECTION UPLOAD ---
+  // --- LOGIQUE D'UPLOAD CORRIGÉE ---
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
     if (files.length === 0 || !editingId) return;
 
     setUploading(true);
-    const fd = new FormData();
-    // ON UTILISE "files" AVEC UN S (comme attendu par ton API)
-    files.forEach(f => fd.append("files", f));
-
+    
     try {
-      const res = await fetch(`/api/chantiers/${editingId}/photos`, { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setPhotos(prev => [...prev, ...data]);
+      // Pour éviter l'erreur "Missing file", on envoie les fichiers un par un
+      // avec la clé "file" que votre API accepte explicitement
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("file", file); // Utilisation de "file" au singulier
+
+        const res = await fetch(`/api/chantiers/${editingId}/photos`, {
+          method: "POST",
+          body: fd // Ne PAS mettre de header Content-Type
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || "Erreur upload");
+        }
+
+        const newAttachments = await res.json();
+        setPhotos(prev => [...prev, ...newAttachments]);
+      }
     } catch (err: any) {
-      alert("Erreur: " + err.message);
+      alert("Erreur upload : " + err.message);
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -258,10 +225,15 @@ export default function Page() {
         </main>
       </div>
 
-      <Modal open={modalOpen} title={editingId ? "Modifier" : "Nouveau"} onClose={() => setModalOpen(false)}>
+      <Modal open={modalOpen} title={editingId ? "Modifier le chantier" : "Nouveau chantier"} onClose={() => setModalOpen(false)}>
         <div className="space-y-6">
-          <input className="w-full border-2 p-3 rounded-xl font-medium" placeholder="Titre" value={formTitle} onChange={e => setFormTitle(e.target.value)} />
+          <input className="w-full border-2 p-3 rounded-xl font-medium" placeholder="Titre du chantier" value={formTitle} onChange={e => setFormTitle(e.target.value)} />
           
+          <div className="grid grid-cols-2 gap-3">
+             <input type="date" className="border p-2 rounded-lg" value={formStart} onChange={e => setFormStart(e.target.value)} />
+             <input type="date" className="border p-2 rounded-lg" value={formEnd} onChange={e => setFormEnd(e.target.value)} />
+          </div>
+
           <section className="bg-slate-50 p-4 rounded-2xl space-y-3">
             <label className="text-xs font-bold text-slate-400 uppercase">Client</label>
             <input className="w-full border p-2 rounded-lg text-sm" placeholder="Nom" value={client.nom} onChange={e => setClient({...client, nom: e.target.value})} />
@@ -273,13 +245,13 @@ export default function Page() {
             <div className="flex justify-between items-center">
               <label className="text-xs font-bold text-slate-400 uppercase">Photos</label>
               <button type="button" onClick={() => editingId ? fileInputRef.current?.click() : alert("Enregistrez d'abord")} className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">
-                {uploading ? "Chargement..." : "+ AJOUTER"}
+                {uploading ? "Envoi..." : "+ AJOUTER"}
               </button>
             </div>
             <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleUpload} />
             <div className="grid grid-cols-4 gap-2">
               {photos.map(p => (
-                <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden border">
+                <div key={p.id} className="relative aspect-square rounded-lg overflow-hidden border bg-slate-200">
                   <img src={p.fileUrl} className="object-cover w-full h-full" alt="chantier" />
                 </div>
               ))}
@@ -311,6 +283,28 @@ function MonthGrid({ cursor, events, onCellClick, onEventClick }: GridProps) {
           </DroppableDayCell>
         );
       })}
+    </div>
+  );
+}
+
+function DraggablePill({ draggableId, style, children, onClick }: { draggableId: string; style?: CSSProperties; children: React.ReactNode; onClick: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: draggableId });
+  const dndStyle: CSSProperties | undefined = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+  return (
+    <div ref={setNodeRef} style={dndStyle} className={isDragging ? "opacity-40 z-50" : "z-10"}>
+      <div style={style} className="w-full rounded-md px-2 py-1 text-[11px] font-bold cursor-grab text-white truncate shadow-sm" onClick={(e) => { e.stopPropagation(); onClick(); }} {...listeners} {...attributes}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function DroppableDayCell({ iso, dayNumber, faded, children, onClick }: { iso: string; dayNumber: number; faded: boolean; children: React.ReactNode; onClick: () => void }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `cell:${iso}` });
+  return (
+    <div ref={setNodeRef} onClick={onClick} className={`min-h-[110px] border p-1 transition-all ${faded ? "bg-slate-50 opacity-50" : "bg-white"} ${isOver ? "bg-blue-50" : ""}`}>
+      <div className="text-right text-[11px] font-bold text-slate-400">{dayNumber}</div>
+      <div className="space-y-1">{children}</div>
     </div>
   );
 }
