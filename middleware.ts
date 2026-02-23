@@ -5,11 +5,12 @@ import { getToken } from "next-auth/jwt";
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1) On définit les accès prioritaires (Auth API et fichiers statiques)
-  // On laisse passer TOUT ce qui est /api/auth pour éviter les boucles de redirection
+  // 1) LAISSER PASSER : Auth, Fichiers statiques et SURTOUT l'API Photos
+  // On ajoute l'exclusion de l'API photos pour éviter que getToken ne bloque le FormData
   if (
     pathname.startsWith("/api/auth") || 
     pathname.startsWith("/_next") || 
+    pathname.includes("/photos") || // <--- AJOUT CRUCIAL
     pathname === "/favicon.ico"
   ) {
     return NextResponse.next();
@@ -18,43 +19,28 @@ export async function middleware(req: NextRequest) {
   // 2) On lit la session
   const token = await getToken({ req });
 
-  // 3) Si on est sur la page de connexion
+  // 3) Gestion de la page de connexion
   if (pathname === "/connexion") {
-    // Si déjà connecté, on redirige vers l'accueil
-    if (token) {
-      return NextResponse.redirect(new URL("/", req.url));
-    }
+    if (token) return NextResponse.redirect(new URL("/", req.url));
     return NextResponse.next();
   }
 
-  // 4) Protection globale : Si pas de token -> /connexion
+  // 4) Protection globale
   if (!token) {
-    const url = new URL("/connexion", req.url);
-    // Optionnel: on peut ajouter ?callbackUrl pour revenir ici après login
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(new URL("/connexion", req.url));
   }
 
-  // 5) Protection spécifique ADMIN
+  // 5) Protection ADMIN
   const role = (token as any)?.role;
-
-  if (pathname.startsWith("/admin")) {
-    if (role !== "ADMIN") {
-      return NextResponse.redirect(new URL("/", req.url));
-    }
+  if (pathname.startsWith("/admin") && role !== "ADMIN") {
+    return NextResponse.redirect(new URL("/", req.url));
   }
 
   return NextResponse.next();
 }
 
-// Le matcher doit être large, mais le code interne du middleware gère les exceptions
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
     "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 };
