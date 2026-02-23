@@ -7,32 +7,37 @@ export const runtime = "nodejs";
 
 export async function POST(req: Request, ctx: any) {
   try {
-    // Sécurité interne puisque le middleware est bypassé
     const auth = await requireWriteAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const { id: jobId } = await ctx.params;
     const formData = await req.formData();
     
-    // On récupère le fichier (on accepte "file" ou "files")
-    const file = (formData.get("file") || formData.get("files")) as File;
+    // On cherche n'importe quelle clé qui contient un fichier
+    let fileToUpload: File | null = null;
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File) {
+        fileToUpload = value;
+        break;
+      }
+    }
 
-    if (!file) {
-      return NextResponse.json({ error: "Fichier non trouvé" }, { status: 400 });
+    if (!fileToUpload) {
+      return NextResponse.json({ error: "Missing file (multipart/form-data: file)" }, { status: 400 });
     }
 
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ error: "Config Storage absente sur Vercel" }, { status: 500 });
+      return NextResponse.json({ error: "Vercel Blob Token manquant" }, { status: 500 });
     }
 
-    const blob = await put(file.name, file, { access: "public" });
+    const blob = await put(fileToUpload.name, fileToUpload, { access: "public" });
 
     const attachment = await prisma.jobAttachment.create({
       data: {
         jobId,
         kind: "PHOTO",
-        fileLabel: file.name,
-        fileType: file.type || "image/jpeg",
+        fileLabel: fileToUpload.name,
+        fileType: fileToUpload.type || "image/jpeg",
         fileUrl: blob.url,
         uploadedByUserId: auth.userId,
       },
@@ -41,5 +46,18 @@ export async function POST(req: Request, ctx: any) {
     return NextResponse.json(attachment);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+export async function GET(req: Request, ctx: any) {
+  try {
+    const { id: jobId } = await ctx.params;
+    const photos = await prisma.jobAttachment.findMany({
+      where: { jobId, kind: "PHOTO" },
+      orderBy: { createdAt: "desc" },
+    });
+    return NextResponse.json(photos);
+  } catch (e: any) {
+    return NextResponse.json({ error: "Erreur" }, { status: 500 });
   }
 }
