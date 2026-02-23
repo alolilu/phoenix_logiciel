@@ -15,22 +15,27 @@ export async function POST(req: Request, ctx: any) {
     
     const formData = await req.formData();
     
-    // On essaie de récupérer le fichier avec la clé "file"
-    const file = formData.get("file") as File;
+    // STRATÉGIE DE SECOURS : On prend la première entrée qui est un fichier
+    let file: File | null = null;
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File) {
+        file = value;
+        break; 
+      }
+    }
 
     if (!file) {
-      // Si on ne trouve pas "file", on regarde toutes les clés reçues pour aider au débug
-      const receivedKeys = Array.from(formData.keys());
-      console.error("Clés reçues par l'API:", receivedKeys);
+      const keys = Array.from(formData.keys());
       return NextResponse.json({ 
-        error: "Missing file (multipart/form-data: file)",
-        debug_recu: receivedKeys 
+        error: "Aucun fichier détecté dans le formulaire",
+        cles_recues: keys,
+        methode: req.method,
+        type: req.headers.get("content-type")
       }, { status: 400 });
     }
 
-    // Vérification de la configuration Vercel
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ error: "Config Vercel Blob manquante" }, { status: 500 });
+      return NextResponse.json({ error: "Variable BLOB_READ_WRITE_TOKEN manquante" }, { status: 500 });
     }
 
     const blob = await put(file.name, file, { access: "public" });
@@ -48,20 +53,6 @@ export async function POST(req: Request, ctx: any) {
 
     return NextResponse.json(attachment);
   } catch (e: any) {
-    console.error("Crash API Photos:", e);
-    return NextResponse.json({ error: e.message }, { status: 500 });
-  }
-}
-
-export async function GET(req: Request, ctx: any) {
-  try {
-    const params = await ctx.params;
-    const photos = await prisma.jobAttachment.findMany({
-      where: { jobId: params.id, kind: "PHOTO" },
-      orderBy: { createdAt: "desc" },
-    });
-    return NextResponse.json(photos);
-  } catch (e: any) {
-    return NextResponse.json({ error: "Erreur chargement" }, { status: 500 });
+    return NextResponse.json({ error: "Erreur serveur", details: e.message }, { status: 500 });
   }
 }
