@@ -4,30 +4,27 @@ const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
   setUploading(true);
   try {
-    for (const f of files) {
+    for (const file of files) {
       const fd = new FormData();
-      // On l'ajoute sous deux noms différents pour être sûr
-      fd.append("file", f);
-      fd.append("files", f);
+      // On ajoute le fichier sous la clé "file"
+      fd.append("file", file);
 
       const res = await fetch(`/api/chantiers/${editingId}/photos`, {
         method: "POST",
         body: fd,
-        // SURTOUT AUCUN HEADER
       });
 
-      const result = await res.json();
+      const data = await res.json();
       if (!res.ok) {
-        console.error("DEBUG SERVEUR:", result);
-        throw new Error(result.error + (result.cles_recues ? " Clés: " + result.cles_recues.join(',') : ""));
+        // Cela va afficher le détail de l'erreur dans une alerte
+        throw new Error(data.error + (data.cles_recues ? " | Reçu: " + data.cles_recues.join(',') : ""));
       }
-      setPhotos(prev => [result, ...prev]);
+      setPhotos(prev => [data, ...prev]);
     }
-    alert("Upload réussi");
+    alert("Upload réussi !");
   } catch (err: any) {
-    alert("ERREUR CRITIQUE : " + err.message);
+    alert("DÉTAIL ERREUR : " + err.message);
   } finally {
     setUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 };

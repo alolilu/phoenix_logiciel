@@ -10,32 +10,39 @@ export async function POST(req: Request, ctx: any) {
     const auth = await requireWriteAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const params = await ctx.params;
-    const jobId = params.id;
+    const { id: jobId } = await ctx.params;
     
-    const formData = await req.formData();
+    // On essaie de lire le FormData
+    let formData;
+    try {
+      formData = await req.formData();
+    } catch (e) {
+      return NextResponse.json({ error: "Impossible de lire le formulaire (FormData)" }, { status: 400 });
+    }
     
-    // STRATÉGIE DE SECOURS : On prend la première entrée qui est un fichier
+    // On cherche n'importe quel fichier présent
     let file: File | null = null;
+    const allKeys = [];
+    
     for (const [key, value] of formData.entries()) {
+      allKeys.push(key);
       if (value instanceof File) {
         file = value;
-        break; 
+        break;
       }
     }
 
     if (!file) {
-      const keys = Array.from(formData.keys());
       return NextResponse.json({ 
-        error: "Aucun fichier détecté dans le formulaire",
-        cles_recues: keys,
-        methode: req.method,
-        type: req.headers.get("content-type")
+        error: "Aucun fichier détecté", 
+        cles_recues: allKeys,
+        aide: "Vérifiez que l'input file a bien un nom ou que le FormData n'est pas vide." 
       }, { status: 400 });
     }
 
+    // Sécurité Token
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      return NextResponse.json({ error: "Variable BLOB_READ_WRITE_TOKEN manquante" }, { status: 500 });
+      return NextResponse.json({ error: "Liaison Vercel Blob manquante (Token absent)" }, { status: 500 });
     }
 
     const blob = await put(file.name, file, { access: "public" });
@@ -53,6 +60,6 @@ export async function POST(req: Request, ctx: any) {
 
     return NextResponse.json(attachment);
   } catch (e: any) {
-    return NextResponse.json({ error: "Erreur serveur", details: e.message }, { status: 500 });
+    return NextResponse.json({ error: "Erreur serveur", message: e.message }, { status: 500 });
   }
 }
