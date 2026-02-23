@@ -4,10 +4,9 @@ const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
   setUploading(true);
   try {
-    for (const file of files) {
+    for (const f of files) {
       const fd = new FormData();
-      // On ajoute le fichier sous la clé "file"
-      fd.append("file", file);
+      fd.append("file", f); // Clé "file"
 
       const res = await fetch(`/api/chantiers/${editingId}/photos`, {
         method: "POST",
@@ -15,15 +14,12 @@ const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        // Cela va afficher le détail de l'erreur dans une alerte
-        throw new Error(data.error + (data.cles_recues ? " | Reçu: " + data.cles_recues.join(',') : ""));
-      }
+      if (!res.ok) throw new Error(data.error || "Erreur upload");
       setPhotos(prev => [data, ...prev]);
     }
-    alert("Upload réussi !");
+    alert("Photo enregistrée !");
   } catch (err: any) {
-    alert("DÉTAIL ERREUR : " + err.message);
+    alert("Erreur : " + err.message);
   } finally {
     setUploading(false);
   }
