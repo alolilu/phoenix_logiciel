@@ -4,8 +4,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
-import { prisma } from "@/src/lib/prisma";
-import { requireWriteAccess } from "@/src/lib/rbac";
+import { prisma } from "@/lib/prisma";
+import { requireWriteAccess } from "@/lib/rbac";
 
 export async function POST(req: NextRequest) {
   try {

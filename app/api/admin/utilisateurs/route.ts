@@ -3,8 +3,8 @@ export const runtime = "nodejs";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/src/lib/prisma";
-import { requireWriteAccess } from "@/src/lib/rbac";
+import { prisma } from "@/lib/prisma";
+import { requireWriteAccess } from "@/lib/rbac";
 
 function json(data: unknown, status = 200) {
   return NextResponse.json(data, { status });

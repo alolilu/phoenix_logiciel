@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { requireAuth, requireWriteAccess } from "@/src/lib/rbac";
+import { prisma } from "@/lib/prisma";
+import { requireAuth, requireWriteAccess } from "@/lib/rbac";
 import { StaffRole } from "@prisma/client";
 
 export const runtime = "nodejs";

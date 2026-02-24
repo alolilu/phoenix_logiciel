@@ -1,5 +1,5 @@
-import { prisma } from "@/src/lib/prisma";
-import { hashPassword } from "@/src/lib/password";
+import { prisma } from "@/lib/prisma";
+import { hashPassword } from "@/lib/password";
 
 async function main() {
   const username = "david.mazzer";

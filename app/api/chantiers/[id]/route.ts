@@ -3,10 +3,10 @@ export const runtime = "nodejs";
 
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { requireWriteAccess } from "@/src/lib/rbac";
+import { prisma } from "@/lib/prisma";
+import { requireWriteAccess } from "@/lib/rbac";
 
-import { logAudit } from "@/src/lib/audit";
+import { logAudit } from "@/lib/audit";
 import { AuditAction, AuditEntityType } from "@prisma/client";
 
 /* ======================================================

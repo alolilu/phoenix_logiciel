@@ -1,12 +1,12 @@
 // app/api/chantiers/route.ts
 export const runtime = "nodejs";
 
-import { logAudit } from "@/src/lib/audit";
+import { logAudit } from "@/lib/audit";
 import { AuditAction, AuditEntityType } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/src/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/src/lib/auth";
+import { authOptions } from "@/lib/auth";
 
 /** ========= Helpers dates ========= */
 

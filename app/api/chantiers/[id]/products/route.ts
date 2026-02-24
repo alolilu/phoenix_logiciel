@@ -1,8 +1,8 @@
 export const runtime = "nodejs";
 
 import { NextResponse, type NextRequest } from "next/server";
-import { prisma } from "@/src/lib/prisma";
-import { requireAuth, requireWriteAccess } from "@/src/lib/rbac";
+import { prisma } from "@/lib/prisma";
+import { requireAuth, requireWriteAccess } from "@/lib/rbac";
 
 type Ctx = { params: Promise<{ id: string }> };
 

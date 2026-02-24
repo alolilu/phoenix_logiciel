@@ -1,5 +1,5 @@
 // src/lib/audit.ts
-import { prisma } from "@/src/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import type { NextRequest } from "next/server";
 import { AuditAction, AuditEntityType } from "@prisma/client";
 
