@@ -2,12 +2,12 @@
 
 export type PhotoDTO = {
   id: string;
-  fileUrl: string;    // URL blob
-  fileLabel: string;  // nom
+  fileUrl: string;
+  fileLabel: string;
   uploadedAt: string; // ISO
 };
 
-function isPhotoDTO(x: any): x is PhotoDTO {
+function isPhotoDto(x: any): x is PhotoDTO {
   return (
     x &&
     typeof x === "object" &&
@@ -19,13 +19,9 @@ function isPhotoDTO(x: any): x is PhotoDTO {
 }
 
 function isPhotoArray(x: unknown): x is PhotoDTO[] {
-  return Array.isArray(x) && x.every(isPhotoDTO);
+  return Array.isArray(x) && x.every(isPhotoDto);
 }
 
-/**
- * Lit du JSON si possible, sinon renvoie null.
- * (Important : en prod, une route peut renvoyer du HTML de login/erreur)
- */
 async function readJsonSafe(res: Response): Promise<unknown> {
   const ct = res.headers.get("content-type") || "";
   if (!ct.includes("application/json")) return null;
@@ -34,30 +30,6 @@ async function readJsonSafe(res: Response): Promise<unknown> {
   } catch {
     return null;
   }
-}
-
-function extractErrorMessage(body: unknown, fallback: string) {
-  if (body && typeof body === "object" && "error" in body && typeof (body as any).error === "string") {
-    return (body as any).error as string;
-  }
-  return fallback;
-}
-
-async function fetchPhotos(jobId: string): Promise<PhotoDTO[]> {
-  const res = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
-    method: "GET",
-    headers: { accept: "application/json" },
-    cache: "no-store",
-  });
-
-  const body = await readJsonSafe(res);
-
-  if (!res.ok) {
-    throw new Error(extractErrorMessage(body, `Refresh photos failed (${res.status})`));
-  }
-
-  // ✅ on force un tableau sain
-  return isPhotoArray(body) ? body : [];
 }
 
 export async function uploadPhotos(args: {
@@ -74,6 +46,7 @@ export async function uploadPhotos(args: {
   setPhotosLoading(true);
 
   try {
+    // 1) POST upload
     const fd = new FormData();
     for (const f of files) fd.append("files", f);
 
@@ -82,26 +55,33 @@ export async function uploadPhotos(args: {
       body: fd,
     });
 
-    const postBody = await readJsonSafe(postRes);
-
     if (!postRes.ok) {
-      throw new Error(extractErrorMessage(postBody, `Upload failed (${postRes.status})`));
+      const body = await readJsonSafe(postRes);
+      const msg =
+        body && typeof body === "object" && body !== null && "error" in body && typeof (body as any).error === "string"
+          ? (body as any).error
+          : `Upload failed (${postRes.status})`;
+      throw new Error(msg);
     }
 
-    // ✅ Si l’API renvoie directement la liste
-    if (isPhotoArray(postBody)) {
-      setPhotos(postBody);
-      return;
+    // 2) GET systématique (source de vérité)
+    const getRes = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
+      method: "GET",
+      headers: { accept: "application/json" },
+      cache: "no-store",
+    });
+
+    if (!getRes.ok) {
+      const body = await readJsonSafe(getRes);
+      const msg =
+        body && typeof body === "object" && body !== null && "error" in body && typeof (body as any).error === "string"
+          ? (body as any).error
+          : `Refresh photos failed (${getRes.status})`;
+      throw new Error(msg);
     }
 
-    // ✅ Sinon : fallback GET (cas où POST renvoie {ok:true,...} ou autre)
-    const list = await fetchPhotos(jobId);
-    setPhotos(list);
-
-    // petit debug utile en prod si besoin
-    if (!isPhotoArray(postBody)) {
-      console.warn("[uploadPhotos] POST did not return PhotoDTO[]; refreshed via GET.", { postBody });
-    }
+    const data = await readJsonSafe(getRes);
+    setPhotos(isPhotoArray(data) ? data : []);
   } finally {
     setPhotosLoading(false);
   }
