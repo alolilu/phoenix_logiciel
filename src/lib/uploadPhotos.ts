@@ -7,19 +7,8 @@ export type PhotoDTO = {
   uploadedAt: string; // ISO
 };
 
-function isPhotoDto(x: any): x is PhotoDTO {
-  return (
-    x &&
-    typeof x === "object" &&
-    typeof x.id === "string" &&
-    typeof x.fileUrl === "string" &&
-    typeof x.fileLabel === "string" &&
-    typeof x.uploadedAt === "string"
-  );
-}
-
 function isPhotoArray(x: unknown): x is PhotoDTO[] {
-  return Array.isArray(x) && x.every(isPhotoDto);
+  return Array.isArray(x);
 }
 
 async function readJsonSafe(res: Response): Promise<unknown> {
@@ -30,6 +19,26 @@ async function readJsonSafe(res: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+async function fetchPhotos(jobId: string): Promise<PhotoDTO[]> {
+  const res = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
+    method: "GET",
+    headers: { accept: "application/json" },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const body = await readJsonSafe(res);
+    const msg =
+      body && typeof body === "object" && body !== null && "error" in body && typeof (body as any).error === "string"
+        ? (body as any).error
+        : `Refresh photos failed (${res.status})`;
+    throw new Error(msg);
+  }
+
+  const data = await readJsonSafe(res);
+  return isPhotoArray(data) ? data : [];
 }
 
 export async function uploadPhotos(args: {
@@ -44,9 +53,7 @@ export async function uploadPhotos(args: {
   if (!Array.isArray(files) || files.length === 0) return;
 
   setPhotosLoading(true);
-
   try {
-    // 1) POST upload
     const fd = new FormData();
     for (const f of files) fd.append("files", f);
 
@@ -64,24 +71,10 @@ export async function uploadPhotos(args: {
       throw new Error(msg);
     }
 
-    // 2) GET systématique (source de vérité)
-    const getRes = await fetch(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
-      method: "GET",
-      headers: { accept: "application/json" },
-      cache: "no-store",
-    });
-
-    if (!getRes.ok) {
-      const body = await readJsonSafe(getRes);
-      const msg =
-        body && typeof body === "object" && body !== null && "error" in body && typeof (body as any).error === "string"
-          ? (body as any).error
-          : `Refresh photos failed (${getRes.status})`;
-      throw new Error(msg);
-    }
-
-    const data = await readJsonSafe(getRes);
-    setPhotos(isPhotoArray(data) ? data : []);
+    // ✅ IMPORTANT : on ignore le JSON du POST (parce qu'en prod il renvoie {ok,received,...})
+    // et on recharge toujours depuis le GET
+    const photos = await fetchPhotos(jobId);
+    setPhotos(photos);
   } finally {
     setPhotosLoading(false);
   }
