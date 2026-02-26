@@ -14,6 +14,37 @@ function badRequest(message: string) {
   return json({ error: message }, 400);
 }
 
+/**
+ * Convertit en username "prenom.nom" (minuscules, sans accents, caractères sûrs).
+ * Ex: "Matéo" + "Mazzer" => "mateo.mazzer"
+ */
+function slugifyUsername(firstName: string, lastName: string) {
+  const normalize = (s: string) =>
+    (s || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // enlève accents
+      .replace(/[^a-z0-9]+/g, ".") // tout ce qui n'est pas alphanum -> "."
+      .replace(/\.+/g, ".") // points multiples -> 1
+      .replace(/^\.|\.$/g, ""); // pas de point au début/fin
+
+  const fn = normalize(firstName);
+  const ln = normalize(lastName);
+
+  const base = [fn, ln].filter(Boolean).join(".");
+  return base;
+}
+
+function normalizeRole(input: unknown): "ADMIN" | "USER" {
+  const role = String(input ?? "USER").toUpperCase();
+  return role === "ADMIN" ? "ADMIN" : "USER";
+}
+
+function readBool(input: unknown, fallback: boolean) {
+  return typeof input === "boolean" ? input : fallback;
+}
+
 // GET /api/admin/utilisateurs  (ADMIN)
 export async function GET(req: NextRequest) {
   const auth = await requireWriteAccess(req);
@@ -43,18 +74,47 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") return badRequest("Body JSON invalide");
 
-  const username = String((body as any).username ?? "").trim();
-  const email = String((body as any).email ?? "").trim().toLowerCase();
-  const password = String((body as any).password ?? "");
-  const role = String((body as any).role ?? "USER").toUpperCase() === "ADMIN" ? "ADMIN" : "USER";
-  const isActive = typeof (body as any).isActive === "boolean" ? (body as any).isActive : true;
+  // ✅ Champs acceptés (tolérant avec le front actuel)
+  const firstName = String((body as any).firstName ?? "").trim();
+  const lastName = String((body as any).lastName ?? "").trim();
 
-  if (!username) return badRequest("username requis");
-  if (!email) return badRequest("email requis");
+  // username peut venir de:
+  // - body.username (idéal)
+  // - body.identifiant (si ton front l'appelle comme ça)
+  // - sinon on le génère depuis firstName/lastName
+  const usernameRaw =
+    (body as any).username ?? (body as any).identifiant ?? "";
+
+  let username = String(usernameRaw ?? "").trim();
+  if (!username) {
+    username = slugifyUsername(firstName, lastName);
+  }
+
+  // email: optionnel (car ton UI n’en envoie pas)
+  // Si tu veux l’obliger, remplace la logique en bas.
+  const emailRaw = (body as any).email;
+  const email = emailRaw ? String(emailRaw).trim().toLowerCase() : "";
+
+  const password = String((body as any).password ?? "");
+  const role = normalizeRole((body as any).role);
+  const isActive = readBool((body as any).isActive, true);
+
+  if (!username) return badRequest("username requis (ou firstName/lastName)");
   if (!password || password.length < 8) return badRequest("password min 8 caractères");
 
+  // Si email est fourni, validation simple
+  if (email) {
+    const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!looksLikeEmail) return badRequest("email invalide");
+  }
+
+  // Vérif doublon:
+  // - toujours sur username
+  // - sur email uniquement si email fourni
   const existing = await prisma.userAccount.findFirst({
-    where: { OR: [{ username }, { email }] },
+    where: {
+     OR: [{ username }, { email }],
+    },
     select: { id: true },
   });
   if (existing) return json({ error: "username ou email déjà utilisé" }, 409);
@@ -62,7 +122,14 @@ export async function POST(req: NextRequest) {
   const passwordHash = await bcrypt.hash(password, 10);
 
   const created = await prisma.userAccount.create({
-    data: { username, email, passwordHash, role, isActive },
+    data: {
+      username,
+      // n’écrit email que si fourni (sinon null/"" selon ton schéma Prisma)
+      email,
+      passwordHash,
+      role,
+      isActive,
+    },
     select: {
       id: true,
       username: true,
@@ -91,21 +158,31 @@ export async function PUT(req: NextRequest) {
 
   const data: any = {};
 
-  if ((body as any).username !== undefined) {
-    const username = String((body as any).username ?? "").trim();
+  // username: accepte aussi "identifiant"
+  if ((body as any).username !== undefined || (body as any).identifiant !== undefined) {
+    const raw = (body as any).username ?? (body as any).identifiant ?? "";
+    const username = String(raw).trim();
     if (!username) return badRequest("username invalide");
     data.username = username;
   }
 
+  // email: optionnel. Si fourni => valide
   if ((body as any).email !== undefined) {
-    const email = String((body as any).email ?? "").trim().toLowerCase();
-    if (!email) return badRequest("email invalide");
-    data.email = email;
+    const emailRaw = (body as any).email;
+if (typeof emailRaw !== "string" || !emailRaw.trim()) return badRequest("email requis");
+const email = emailRaw.trim().toLowerCase();
+    if (email) {
+      const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      if (!looksLikeEmail) return badRequest("email invalide");
+      data.email = email;
+    } else {
+      // si tu veux permettre "vider email"
+      data.email = null; // ⚠️ nécessite que ton schéma Prisma autorise null
+    }
   }
 
   if ((body as any).role !== undefined) {
-    const role = String((body as any).role ?? "USER").toUpperCase() === "ADMIN" ? "ADMIN" : "USER";
-    data.role = role;
+    data.role = normalizeRole((body as any).role);
   }
 
   if ((body as any).isActive !== undefined) {
@@ -119,23 +196,25 @@ export async function PUT(req: NextRequest) {
     data.passwordHash = await bcrypt.hash(password, 10);
   }
 
-  // vérif doublon si email/username changent
-  if (data.email || data.username) {
-    const other = await prisma.userAccount.findFirst({
-      where: {
-        AND: [
-          { id: { not: id } },
-          {
-            OR: [
-              data.email ? { email: data.email } : undefined,
-              data.username ? { username: data.username } : undefined,
-            ].filter(Boolean) as any,
-          },
-        ],
-      },
-      select: { id: true },
-    });
-    if (other) return json({ error: "username ou email déjà utilisé" }, 409);
+  // Vérif doublon si email/username changent
+  if (data.email !== undefined || data.username) {
+    const or: any[] = [];
+    if (data.username) or.push({ username: data.username });
+    // ne check email que si défini ET non null/empty
+    if (data.email) or.push({ email: data.email });
+
+    if (or.length) {
+      const other = await prisma.userAccount.findFirst({
+        where: {
+          AND: [
+            { id: { not: id } },
+            { OR: or },
+          ],
+        },
+        select: { id: true },
+      });
+      if (other) return json({ error: "username ou email déjà utilisé" }, 409);
+    }
   }
 
   const updated = await prisma.userAccount.update({
