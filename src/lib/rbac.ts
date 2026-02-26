@@ -7,6 +7,15 @@ export type AuthResult =
   | { ok: true; role: PhoenixRole; userId: string; token: any }
   | { ok: false; status: 401 | 403; error: "UNAUTHORIZED" | "FORBIDDEN" };
 
+  export async function requireReadAccess(req: NextRequest): Promise<AuthResult> {
+  const auth = await requireAuth(req);
+  if (!auth.ok) return auth;
+  // ADMIN ou USER => OK
+  if (auth.role !== "ADMIN" && auth.role !== "USER") {
+    return { ok: false, status: 403, error: "FORBIDDEN" };
+  }
+  return auth;
+}
 function readRoleFromToken(token: any): PhoenixRole | null {
   const r = token?.role ?? token?.user?.role ?? null;
   if (r === "ADMIN" || r === "USER") return r;

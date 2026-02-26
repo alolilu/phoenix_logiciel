@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireWriteAccess } from "@/lib/rbac";
+import { requireReadAccess } from "@/lib/rbac";
 import { put } from "@vercel/blob";
 
 export const runtime = "nodejs";
@@ -38,7 +38,7 @@ async function listPhotos(jobId: string): Promise<PhotoDTO[]> {
 
 export async function GET(req: NextRequest, { params }: Ctx) {
   try {
-    const auth = await requireWriteAccess(req);
+    const auth = await requireReadAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const { id: jobId } = await params;
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 
 export async function POST(req: NextRequest, { params }: Ctx) {
   try {
-    const auth = await requireWriteAccess(req);
+    const auth = await requireReadAccess(req);
     if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const { id: jobId } = await params;

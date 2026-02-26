@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-
+import { requireReadAccess, requireWriteAccess } from "@/lib/rbac";
 /** ========= Helpers dates ========= */
 
 function pad2(n: number) {
@@ -131,8 +131,14 @@ async function jobItemToUI(item: any) {
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireReadAccess(req);
+if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const session = await getServerSession(authOptions);
     if (!session) {
+      const dbUser = await getDbUserFromSession(session);
+if (!dbUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+if (!dbUser.isActive) return NextResponse.json({ error: "User disabled" }, { status: 403 });
+// pas de check role ici => ADMIN + USER peuvent lire
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -169,6 +175,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireWriteAccess(req);
+if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
