@@ -11,6 +11,8 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import { uploadPhotos } from "@/lib/uploadPhotos";
+import type { PhotoDTO } from "@/lib/uploadPhotos";
 
 /** ---------- Mobile helper ---------- */
 function useIsMobile(breakpointPx = 768) {
@@ -100,13 +102,6 @@ type StaffDto = {
   fullName: string;
   createdAt: string | null;
   updatedAt: string | null;
-};
-
-type PhotoDTO = {
-  id: string;
-  fileUrl: string;
-  fileLabel: string;
-  uploadedAt: string;
 };
 
 const FOREST_BTN = "bg-[#183536] text-white";
@@ -297,15 +292,6 @@ async function fetchStaff(): Promise<StaffDto[]> {
 
 async function fetchPhotos(jobId: string): Promise<PhotoDTO[]> {
   return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, { method: "GET" });
-}
-
-async function uploadPhotos(jobId: string, files: File[]): Promise<PhotoDTO[]> {
-  const fd = new FormData();
-  for (const f of files) fd.append("files", f);
-  return apiJSON<PhotoDTO[]>(`/api/chantiers/${encodeURIComponent(jobId)}/photos`, {
-    method: "POST",
-    body: fd,
-  });
 }
 
 /** ---------- UI Components ---------- */
@@ -662,7 +648,34 @@ export default function Page() {
   }, [isMobile, view]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
+  const jobId = editingId;
+  if (!jobId) {
+    console.warn("Aucun chantier sélectionné (editingId null)");
+    e.target.value = "";
+    return;
+  }
 
+  const list = e.target.files;
+  if (!list || list.length === 0) return;
+
+  const files = Array.from(list);
+  e.target.value = "";
+
+  setError(null);
+  try {
+  await uploadPhotos({
+  jobId,
+  files,
+  setPhotos: (p: PhotoDTO[]) => setPhotos(p),
+  setPhotosLoading: (v: boolean) => setPhotosLoading(v),
+});
+  } catch (err: any) {
+    setError(err?.message ?? "Erreur upload photos");
+    setPhotos([]); // sécurité UI : on garde un tableau
+    setPhotosLoading(false);
+  }
+}
   async function refresh() {
     setLoading(true);
     setError(null);
@@ -917,26 +930,6 @@ export default function Page() {
       left: clamp(left, margin, vw - panelWidth - margin),
       width: panelWidth,
     });
-  }
-
-  async function handlePickPhotos(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    if (!editingId) {
-      window.alert("Enregistre d’abord le chantier, puis ajoute les photos.");
-      return;
-    }
-
-    setError(null);
-    setPhotosLoading(true);
-    try {
-      const uploaded = await uploadPhotos(editingId, Array.from(files));
-      setPhotos(uploaded);
-    } catch (e: any) {
-      setError(e?.message ?? "Erreur upload photos");
-    } finally {
-      setPhotosLoading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
   }
 
   return (
@@ -1223,7 +1216,8 @@ export default function Page() {
                   capture="environment"
                   multiple
                   className="hidden"
-                  onChange={(e) => handlePickPhotos(e.target.files)}
+                  disabled={photosLoading}
+                  onChange={onUploadPhotos}
                 />
 
                 <button
@@ -1250,22 +1244,42 @@ export default function Page() {
               </div>
             </div>
 
-            {!editingId ? (
-              <div className="mt-2 text-sm text-slate-600">Enregistre le chantier une première fois pour pouvoir associer des photos.</div>
-            ) : photosLoading ? (
-              <div className="mt-3 text-sm text-slate-600">Chargement photos…</div>
-            ) : photos.length === 0 ? (
-              <div className="mt-3 text-sm text-slate-600">Aucune photo.</div>
-            ) : (
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                {photos.map((p) => (
-                  <a key={p.id} href={p.fileUrl} target="_blank" rel="noreferrer" className="block rounded-xl border overflow-hidden hover:opacity-90">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={p.fileUrl} alt={p.fileLabel} className="h-28 w-full object-cover" />
-                  </a>
-                ))}
-              </div>
-            )}
+             {!editingId ? (
+  <div className="mt-2 text-sm text-slate-600">
+    Enregistre le chantier une première fois pour pouvoir associer des photos.
+  </div>
+) : photosLoading ? (
+  <div className="mt-3 text-sm text-slate-600">Chargement photos…</div>
+) : (() => {
+  const safePhotos: PhotoDTO[] = Array.isArray(photos) ? photos : [];
+
+  if (safePhotos.length === 0) {
+    return <div className="mt-3 text-sm text-slate-600">Aucune photo.</div>;
+  }
+
+  return (
+    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+      {safePhotos
+        .filter(
+          (p) =>
+            p &&
+            typeof p.id === "string" &&
+            typeof p.fileUrl === "string" &&
+            p.fileUrl.length > 0
+        )
+        .map((p) => (
+          <a key={p.id} href={p.fileUrl} target="_blank" rel="noreferrer">
+            <img
+              src={p.fileUrl}
+              alt={p.fileLabel || "Photo"}
+              loading="lazy"
+              className="w-full h-28 object-cover rounded-lg border"
+            />
+          </a>
+        ))}
+    </div>
+  );
+})()}
 
             {editingId ? (
               <div className="mt-4 flex items-center justify-end">

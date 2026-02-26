@@ -1,6 +1,4 @@
 // app/api/chantiers/[id]/pdf/route.ts
-export const runtime = "nodejs";
-
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -9,6 +7,8 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
+
+export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -31,6 +31,8 @@ function toISODateUTC(d: Date) {
   const da = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${da}`;
 }
+
+// Sert uniquement pour le logo (dans /public)
 function fileUrlToPublicAbsPath(fileUrl: string) {
   const rel = fileUrl.startsWith("/") ? fileUrl.slice(1) : fileUrl;
   return path.join(process.cwd(), "public", rel);
@@ -40,6 +42,34 @@ async function loadBytesFromPublic(fileUrl: string): Promise<Uint8Array> {
   const buf = await readFile(abs);
   return new Uint8Array(buf);
 }
+
+// Petit timeout pour éviter un PDF bloqué si un blob ne répond pas
+async function fetchWithTimeout(url: string, ms = 10000) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try {
+    const res = await fetch(url, { signal: ac.signal, cache: "no-store" });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Charge une image depuis une URL (Vercel Blob public)
+async function loadBytesFromUrl(url: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+  const res = await fetchWithTimeout(url, 15000);
+  if (!res.ok) throw new Error(`Fetch image failed: ${res.status}`);
+  const contentType = res.headers.get("content-type") || "";
+  const ab = await res.arrayBuffer();
+  return { bytes: new Uint8Array(ab), contentType };
+}
+
+function normalizeMime(t: string) {
+  const ct = (t || "").toLowerCase().split(";")[0].trim();
+  if (ct === "image/jpg") return "image/jpeg";
+  return ct;
+}
+
 function winAnsiSafe(s: string) {
   return (s ?? "")
     .replaceAll("→", "->")
@@ -125,21 +155,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     const endISO = toISODateUTC(new Date(job.endAt));
 
     const intervenants = (job.staffLinks || [])
-  .map((l: { staff?: { firstName?: string | null; lastName?: string | null } | null }) =>
-    `${l.staff?.firstName ?? ""} ${l.staff?.lastName ?? ""}`.trim()
-  )
-  .filter((s: string): s is string => Boolean(s));
+      .map((l) => `${l.staff?.firstName ?? ""} ${l.staff?.lastName ?? ""}`.trim())
+      .filter((s): s is string => Boolean(s));
 
     const photos = (job.attachments || [])
-  .map((a: { fileUrl: string; fileType: string; fileLabel: string }) => ({
-    url: a.fileUrl,
-    type: a.fileType,
-    label: a.fileLabel,
-  }))
-  .filter(
-    (p: { type: string }) =>
-      p.type === "image/jpeg" || p.type === "image/jpg" || p.type === "image/png"
-  );
+      .map((a) => ({
+        url: a.fileUrl ?? "",
+        type: normalizeMime((a as any).fileType ?? ""), // ⚠️ si fileType pas en DB, ça restera ""
+        label: a.fileLabel ?? "photo",
+      }))
+      .filter((p) => !!p.url);
 
     const { client, restNotes } = extractClientBlock(String(job.notes || ""));
 
@@ -163,36 +188,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       logoPng = null;
     }
 
-    /** ===== PAGE 1 : header type "facture" + contenu ===== */
+    /** ===== PAGE 1 : header + contenu ===== */
     {
       const page = pdf.addPage([w, h]);
-
       const yTop = h - margin;
 
-      // Zones
       const leftX = margin;
 
-      // Bloc client à droite
       const rightBoxW = 280;
       const rightX = w - margin - rightBoxW;
 
-      // --- Logo (gauche)
       const logoMax = 56;
-      const logoW = logoPng ? (logoPng.width * (logoMax / logoPng.height)) : 0;
+      const logoW = logoPng ? logoPng.width * (logoMax / logoPng.height) : 0;
       const logoH = logoPng ? logoMax : 0;
 
-      // On veut : texte sous le logo, donc on réserve une "colonne logo"
-      const logoColW = Math.max(64, Math.ceil(logoW)); // largeur du logo (ou mini)
       const logoY = yTop - logoH;
 
       if (logoPng) {
         page.drawImage(logoPng, { x: leftX, y: logoY, width: logoW, height: logoH });
       }
 
-      // --- Texte entreprise : ALIGNÉ sous le logo (pas à droite du logo)
-      // On démarre le texte au même X que le logo, et en dessous.
       const companyX = leftX;
-      let companyY = logoY - 18; // sous le logo
+      let companyY = logoY - 18;
 
       page.drawText(winAnsiSafe(COMPANY.name), {
         x: companyX,
@@ -211,7 +228,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         color: cGray,
       });
 
-      // --- Titre "FICHE CHANTIER" CENTRÉ (au milieu de la page)
       const title = "FICHE CHANTIER";
       const titleSize = 20;
       const titleW = fontBold.widthOfTextAtSize(title, titleSize);
@@ -224,7 +240,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         color: rgb(0, 0, 0),
       });
 
-      // --- Bloc client (droite)
       const boxTop = yTop - 40;
       const boxH = 92;
 
@@ -260,28 +275,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       cy -= 14;
       clientLine("Email :", client.email, cy);
 
-      // Adresse : wrap + plus lisible
       const addrLines = wrapText(fontBold, client.adresse || "", 9, rightBoxW - 24);
       if (addrLines.length) {
         let ay = boxTop - boxH + 12;
-        // on écrit max 2 lignes dans le bloc
         for (const l of addrLines.slice(0, 2)) {
           page.drawText(l, { x: rightX + 12, y: ay, size: 9, font: fontBold, color: cGray });
           ay -= 11;
         }
       }
 
-      // --- Ligne séparatrice sous l'en-tête
-      // On place cette ligne plus bas pour laisser respirer (comme demandé)
-      const headerBottomY = Math.min(companyY - 18, boxTop - boxH - 16); // le plus bas des deux
+      const headerBottomY = Math.min(companyY - 18, boxTop - boxH - 16);
       let y = headerBottomY;
 
       page.drawLine({ start: { x: margin, y }, end: { x: w - margin, y }, thickness: 1, color: cLine });
-
-      // --- Espace supplémentaire avant les éléments (demandé)
       y -= 26;
 
-      // ID
       page.drawText(clampText(`ID: ${job.id}`, 100), {
         x: margin,
         y,
@@ -290,10 +298,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         color: cGray,
       });
 
-      // encore un peu d'air
       y -= 26;
 
-      // Elements du chantier
       page.drawText("Elements du chantier", { x: margin, y, size: 13, font: fontBold, color: cDark });
       y -= 10;
       page.drawLine({ start: { x: margin, y }, end: { x: w - margin, y }, thickness: 1, color: cLine });
@@ -313,7 +319,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
       y -= 16;
 
-      // Notes intervenant
       page.drawText("Notes intervenant", { x: margin, y, size: 13, font: fontBold, color: cDark });
       y -= 10;
       page.drawLine({ start: { x: margin, y }, end: { x: w - margin, y }, thickness: 1, color: cLine });
@@ -358,8 +363,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const x = col === 0 ? margin : margin + colW + gap;
 
         try {
-          const bytes = await loadBytesFromPublic(ph.url);
-          const img = ph.type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+          const { bytes, contentType } = await loadBytesFromUrl(ph.url);
+
+          // On décide à partir de fileType (si dispo) sinon content-type fetch
+          const type = normalizeMime(ph.type || contentType);
+          if (type !== "image/png" && type !== "image/jpeg") {
+            throw new Error(`Unsupported image type: ${type}`);
+          }
+
+          const img = type === "image/png" ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
 
           const dims = img.scale(1);
           const ratio = dims.width / dims.height;
@@ -368,10 +380,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           const drawW = colW;
           const drawH = Math.min(maxImgH, drawW / ratio);
 
-          // cadre
           p.drawRectangle({ x, y: py - maxImgH, width: colW, height: maxImgH, borderWidth: 1, borderColor: cLine });
 
-          // image centrée
           p.drawImage(img, {
             x: x + (colW - drawW) / 2,
             y: py - maxImgH + (maxImgH - drawH) / 2,
@@ -379,7 +389,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             height: drawH,
           });
 
-          // label
           p.drawText(clampText(ph.label || "photo", 70), {
             x,
             y: py - maxImgH - 13,
@@ -388,7 +397,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
             color: cGray,
           });
         } catch {
-          p.drawText("Photo illisible (format non supporte)", { x, y: py - 14, size: 10, font, color: cGray });
+          p.drawText("Photo illisible (format non supporté)", { x, y: py - 14, size: 10, font, color: cGray });
         }
 
         if (col === 0) col = 1;
