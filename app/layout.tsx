@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Phoenix Ops",
   description: "Planning terrain Phoenix Nouvelle-Aquitaine",
-  manifest: "/manifest.json",
+  manifest: "/manifest-v4.webmanifest",
   themeColor: "#183536",
 };
 
