@@ -17,23 +17,27 @@ export const authOptions: NextAuthOptions = {
       },
 
       async authorize(credentials) {
-        const email = String(credentials?.email ?? "").trim().toLowerCase();
-        const password = String(credentials?.password ?? "");
+        const identRaw =
+  String((credentials as any)?.email ?? "").trim(); // le formulaire peut envoyer ici "identifiant"
+const password = String(credentials?.password ?? "");
 
-        if (!email || !password) return null;
+const ident = identRaw.toLowerCase();
 
-        const user = await prisma.userAccount.findUnique({
-          where: { email },
-          select: {
-            id: true,
-            email: true,
-            username: true,
-            passwordHash: true,
-            role: true,
-            isActive: true,
-          },
-        });
+if (!ident || !password) return null;
 
+const user = await prisma.userAccount.findFirst({
+  where: {
+    OR: [{ email: ident }, { username: identRaw.trim() }],
+  },
+  select: {
+    id: true,
+    email: true,
+    username: true,
+    passwordHash: true,
+    role: true,
+    isActive: true,
+  },
+});
         if (!user) return null;
         if (!user.isActive) return null;
 
