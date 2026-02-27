@@ -12,32 +12,35 @@ export const authOptions: NextAuthOptions = {
     CredentialsProvider({
       name: "Credentials",
       credentials: {
-        email: { label: "Email", type: "text" },
+        username: { label: "Identifiant", type: "text" }, // ton form envoie "username"
+        email: { label: "Email", type: "text" }, // au cas où (fallback)
         password: { label: "Mot de passe", type: "password" },
       },
 
       async authorize(credentials) {
-        const identRaw =
-  String((credentials as any)?.email ?? "").trim(); // le formulaire peut envoyer ici "identifiant"
-const password = String(credentials?.password ?? "");
+        const usernameRaw = String((credentials as any)?.username ?? "").trim();
+        const emailRaw = String((credentials as any)?.email ?? "").trim();
+        const identRaw = usernameRaw || emailRaw;
 
-const ident = identRaw.toLowerCase();
+        const password = String((credentials as any)?.password ?? "");
+        const identLower = identRaw.toLowerCase();
 
-if (!ident || !password) return null;
+        if (!identRaw || !password) return null;
 
-const user = await prisma.userAccount.findFirst({
-  where: {
-    OR: [{ email: ident }, { username: identRaw.trim() }],
-  },
-  select: {
-    id: true,
-    email: true,
-    username: true,
-    passwordHash: true,
-    role: true,
-    isActive: true,
-  },
-});
+        const user = await prisma.userAccount.findFirst({
+          where: {
+            OR: [{ email: identLower }, { username: identRaw }],
+          },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            passwordHash: true,
+            role: true,
+            isActive: true,
+          },
+        });
+
         if (!user) return null;
         if (!user.isActive) return null;
 
@@ -56,19 +59,16 @@ const user = await prisma.userAccount.findFirst({
 
   callbacks: {
     async jwt({ token, user }) {
-      // 1) Cas normal: au moment du login, on injecte tout
       if (user) {
         (token as any).userId = (user as any).id;
         (token as any).role = (user as any).role ?? "USER";
         token.email = (user as any).email ?? token.email;
       }
 
-      // 2) Backfill: si userId absent (vieux cookie), on tente sub
       if (!(token as any).userId && token.sub) {
         (token as any).userId = token.sub;
       }
 
-      // 3) Backfill DB: si toujours absent, on récupère via email
       if (!(token as any).userId && token.email) {
         const dbUser = await prisma.userAccount.findUnique({
           where: { email: String(token.email).toLowerCase() },
