@@ -333,9 +333,17 @@ function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-6" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-6" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-5xl h-[92vh] rounded-2xl bg-white shadow-xl border flex flex-col overflow-hidden">
+       <div
+  className={[
+    "relative w-full bg-white shadow-xl border flex flex-col overflow-hidden",
+    // ✅ Mobile: plein écran
+    "h-[100dvh] rounded-none",
+    // ✅ Desktop: modal classique
+    "md:max-w-5xl md:h-[92vh] md:rounded-2xl",
+  ].join(" ")}
+>
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <div className="text-lg font-bold">{title}</div>
           <button onClick={onClose} className="h-9 w-9 rounded-lg border hover:bg-slate-50" aria-label="Fermer" type="button">
@@ -933,21 +941,27 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="bg-white border-b">
-        <div className="mx-auto max-w-6xl px-6 py-5 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-3xl font-bold truncate">Phoenix Ops – Planning</div>
-            <div className="text-slate-600 mt-1 truncate">Gestion des chantiers : Diogène, post-mortem, insalubre, 3D…</div>
-          </div>
-
-          <button onClick={() => openNewChantier()} className={`shrink-0 rounded-xl px-5 py-3 font-semibold hover:opacity-95 ${FOREST_BTN}`} disabled={saving}>
-            + Nouveau
-          </button>
-        </div>
+   <main className="min-h-screen bg-slate-50">
+  {/* Header desktop uniquement (évite de bouffer l’écran sur mobile) */}
+  <div className="bg-white border-b hidden md:block">
+    <div className="mx-auto max-w-6xl px-6 py-5 flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <div className="text-3xl font-bold truncate">Phoenix Ops – Planning</div>
+        <div className="text-slate-600 mt-1 truncate">Gestion des chantiers : Diogène, post-mortem, insalubre, 3D…</div>
       </div>
 
-      <div className="mx-auto max-w-6xl px-6 py-8 space-y-6">
+      <button
+        onClick={() => openNewChantier()}
+        className={`shrink-0 rounded-xl px-5 py-3 font-semibold hover:opacity-95 ${FOREST_BTN}`}
+        disabled={saving}
+      >
+        + Nouveau
+      </button>
+    </div>
+  </div>
+
+  {/* Contenu : padding compact sur mobile */}
+  <div className="mx-auto max-w-6xl px-3 py-4 md:px-6 md:py-8 space-y-4 md:space-y-6">
         {error ? (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
             <div className="font-semibold">Erreur</div>
@@ -955,34 +969,34 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
           </div>
         ) : null}
 
-        <div className="rounded-2xl border bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border bg-white p-3 md:p-6 shadow-sm">
           <div className="flex items-start justify-between gap-4">
             <div className="text-2xl font-bold">Planning</div>
 
             <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <button onClick={() => setView("jour")} className={`rounded-lg border px-4 py-2 font-semibold ${view === "jour" ? FOREST_BTN : "bg-white"}`}>
+              <button onClick={() => setView("jour")} className={`rounded-lg border px-4 py-3 font-semibold ${view === "jour" ? FOREST_BTN : "bg-white"}`}>
                 Jour
               </button>
-              <button onClick={() => setView("semaine")} className={`rounded-lg border px-4 py-2 font-semibold ${view === "semaine" ? FOREST_BTN : "bg-white"}`}>
+              <button onClick={() => setView("semaine")} className={`rounded-lg border px-4 py-3 font-semibold ${view === "semaine" ? FOREST_BTN : "bg-white"}`}>
                 Semaine
               </button>
-              <button onClick={() => setView("mois")} className={`rounded-lg border px-4 py-2 font-semibold ${view === "mois" ? FOREST_BTN : "bg-white"}`}>
+              <button onClick={() => setView("mois")} className={`rounded-lg border px-4 py-3 font-semibold ${view === "mois" ? FOREST_BTN : "bg-white"}`}>
                 Mois
               </button>
             </div>
           </div>
 
           <div className="flex items-center gap-2 mt-3 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <button onClick={() => setStatusFilter("ALL")} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${statusFilter === "ALL" ? FOREST_BTN : "bg-white"}`}>
+            <button onClick={() => setStatusFilter("ALL")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "ALL" ? FOREST_BTN : "bg-white"}`}>
               Tous
             </button>
-            <button onClick={() => setStatusFilter("EN_ATTENTE")} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${statusFilter === "EN_ATTENTE" ? FOREST_BTN : "bg-white"}`}>
+            <button onClick={() => setStatusFilter("EN_ATTENTE")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "EN_ATTENTE" ? FOREST_BTN : "bg-white"}`}>
               En attente
             </button>
-            <button onClick={() => setStatusFilter("EN_COURS")} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${statusFilter === "EN_COURS" ? FOREST_BTN : "bg-white"}`}>
+            <button onClick={() => setStatusFilter("EN_COURS")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "EN_COURS" ? FOREST_BTN : "bg-white"}`}>
               En cours
             </button>
-            <button onClick={() => setStatusFilter("TERMINE")} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${statusFilter === "TERMINE" ? FOREST_BTN : "bg-white"}`}>
+            <button onClick={() => setStatusFilter("TERMINE")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "TERMINE" ? FOREST_BTN : "bg-white"}`}>
               Terminé
             </button>
           </div>
@@ -1340,51 +1354,57 @@ function MonthGrid({
   for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-7 gap-3 px-1">
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="text-center text-slate-600 font-semibold">
-            {weekdayShortFR(i)}
-          </div>
-        ))}
-      </div>
+  <div className="space-y-3">
+    <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="min-w-[760px] md:min-w-0">
+        {/* Jours semaine */}
+        <div className="grid grid-cols-7 gap-3 px-1">
+          {Array.from({ length: 7 }).map((_, i) => (
+            <div key={i} className="text-center text-slate-600 font-semibold">
+              {weekdayShortFR(i)}
+            </div>
+          ))}
+        </div>
 
-      <div className="grid grid-cols-7 gap-3">
-        {days.map((d) => {
-          const iso = toISODate(d);
-          const inMonth = d.getMonth() === cursor.getMonth();
-          const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
+        {/* Grille */}
+        <div className="mt-3 grid grid-cols-7 gap-3">
+          {days.map((d) => {
+            const iso = toISODate(d);
+            const inMonth = d.getMonth() === cursor.getMonth();
+            const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
 
-          const visible = dayEvents.slice(0, 3);
-          const hiddenCount = Math.max(0, dayEvents.length - visible.length);
+            const visible = dayEvents.slice(0, 3);
+            const hiddenCount = Math.max(0, dayEvents.length - visible.length);
 
-          return (
-            <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={!inMonth} onClick={() => onCellClick(iso)}>
-              {visible.map((e) => (
-                <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
-              ))}
+            return (
+              <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={!inMonth} onClick={() => onCellClick(iso)}>
+                {visible.map((e) => (
+                  <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
+                ))}
 
-              {hiddenCount > 0 && (
-                <button
-                  type="button"
-                  className="w-full rounded-lg border bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    const cell = ev.currentTarget.closest("[data-iso]") as HTMLElement | null;
-                    const rect = cell?.getBoundingClientRect();
-                    if (rect) onMore(iso, rect);
-                  }}
-                  title="Afficher les autres chantiers"
-                >
-                  +{hiddenCount} autres
-                </button>
-              )}
-            </DroppableDayCell>
-          );
-        })}
+                {hiddenCount > 0 && (
+                  <button
+                    type="button"
+                    className="w-full rounded-lg border bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 min-h-[44px]"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      const cell = ev.currentTarget.closest("[data-iso]") as HTMLElement | null;
+                      const rect = cell?.getBoundingClientRect();
+                      if (rect) onMore(iso, rect);
+                    }}
+                    title="Afficher les autres chantiers"
+                  >
+                    +{hiddenCount} autres
+                  </button>
+                )}
+              </DroppableDayCell>
+            );
+          })}
+        </div>
       </div>
     </div>
-  );
+  </div>
+);
 }
 
 function WeekGrid({
@@ -1403,29 +1423,46 @@ function WeekGrid({
   const w0 = startOfWeekMonday(cursor);
   const days = Array.from({ length: 7 }).map((_, i) => addDays(w0, i));
 
-  return (
+    return (
     <div className="space-y-3">
-      <div className="grid grid-cols-7 gap-3 px-1">
-        {days.map((_, i) => (
-          <div key={i} className="text-center text-slate-600 font-semibold">
-            {weekdayShortFR(i)}
+      {/* ✅ Mobile: scroll horizontal propre + largeur mini lisible */}
+      <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="min-w-[760px] md:min-w-0">
+          <div className="grid grid-cols-7 gap-3 px-1">
+            {days.map((_, i) => (
+              <div key={i} className="text-center text-slate-600 font-semibold">
+                {weekdayShortFR(i)}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div className="grid grid-cols-7 gap-3">
-        {days.map((d) => {
-          const iso = toISODate(d);
-          const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
+          <div className="mt-3 grid grid-cols-7 gap-3">
+            {days.map((d) => {
+              const iso = toISODate(d);
+              const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
 
-          return (
-            <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={false} onClick={() => onCellClick(iso)}>
-              {dayEvents.map((e) => (
-                <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
-              ))}
-            </DroppableDayCell>
-          );
-        })}
+              return (
+                <DroppableDayCell
+                  key={iso}
+                  iso={iso}
+                  dayNumber={d.getDate()}
+                  faded={false}
+                  onClick={() => onCellClick(iso)}
+                >
+                  {dayEvents.map((e) => (
+                    <EventPill
+                      key={`${e.id}@${iso}`}
+                      e={e}
+                      cellISO={iso}
+                      onEventClick={onEventClick}
+                      onPdf={onPdf}
+                    />
+                  ))}
+                </DroppableDayCell>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
