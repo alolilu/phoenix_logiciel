@@ -28,10 +28,17 @@ async function apiJSON<T>(url: string, init?: RequestInit): Promise<T> {
     },
   });
 
+  const isJson = (res.headers.get("content-type") || "").includes("application/json");
+
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    // tes API renvoient souvent du JSON {error:"..."} : on garde le texte brut
-    throw new Error(text || `Erreur API (${res.status})`);
+    const payload = isJson ? await res.json().catch(() => null) : await res.text().catch(() => "");
+    const msg =
+      typeof payload === "string"
+        ? payload
+        : payload?.error
+        ? String(payload.error)
+        : `Erreur API (${res.status})`;
+    throw new Error(msg);
   }
 
   return (await res.json()) as T;
@@ -55,12 +62,64 @@ async function createIntervenant(payload: {
   });
 }
 
+async function patchIntervenant(
+  id: string,
+  payload: Partial<Pick<StaffItem, "fullName" | "phoneNumber" | "email" | "notes" | "isActive">>
+): Promise<StaffItem> {
+  return apiJSON<StaffItem>(`/api/intervenants/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+async function purgeIntervenant(id: string): Promise<{ ok: true }> {
+  return apiJSON<{ ok: true }>(`/api/intervenants/${encodeURIComponent(id)}/purge`, {
+    method: "DELETE",
+  });
+}
+
 function roleLabel(r: StaffRole) {
   if (r === "GERANT") return "Gérant";
   if (r === "PRESTATAIRE") return "Prestataire";
   if (r === "ASSISTANT") return "Assistant";
   if (r === "STAGIAIRE") return "Stagiaire";
   return "Technicien";
+}
+
+/** Modal simple */
+function Modal({
+  open,
+  title,
+  onClose,
+  children,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-6" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full h-[100dvh] rounded-none bg-white shadow-xl border flex flex-col overflow-hidden md:max-w-2xl md:h-auto md:rounded-2xl">
+        <div className="px-4 py-3 border-b flex items-center justify-between">
+          <div className="text-base font-bold">{title}</div>
+          <button
+            onClick={onClose}
+            className="min-h-[44px] min-w-[44px] rounded-xl border hover:bg-slate-50"
+            aria-label="Fermer"
+            type="button"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="px-4 py-4 overflow-auto">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function Page() {
@@ -71,13 +130,22 @@ export default function Page() {
 
   const [items, setItems] = useState<StaffItem[]>([]);
 
-  // Form
+  // Form create
   const [fullName, setFullName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<StaffRole>("TECHNICIEN");
   const [notes, setNotes] = useState("");
   const [isActive, setIsActive] = useState(true);
+
+  // Modal edit
+  const [editOpen, setEditOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editFullName, setEditFullName] = useState("");
+  const [editPhoneNumber, setEditPhoneNumber] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
 
   async function refresh() {
     setLoading(true);
@@ -114,12 +182,9 @@ export default function Page() {
         isActive,
       });
 
-      // Ajoute en haut
       setItems((prev) => [created, ...prev]);
-
       setSuccess(`Intervenant créé : ${created.fullName}`);
 
-      // reset form
       setFullName("");
       setPhoneNumber("");
       setEmail("");
@@ -133,28 +198,81 @@ export default function Page() {
     }
   }
 
-  async function onDelete(id: string, label: string) {
-    if (!confirm(`Supprimer (désactiver) l’intervenant : ${label} ?`)) return;
+  function openEdit(s: StaffItem) {
+    setError(null);
+    setSuccess(null);
+    setEditId(s.id);
+    setEditFullName(s.fullName || "");
+    setEditPhoneNumber(s.phoneNumber || "");
+    setEditEmail(s.email || "");
+    setEditNotes(s.notes || "");
+    setEditIsActive(!!s.isActive);
+    setEditOpen(true);
+  }
+
+  async function saveEdit() {
+    if (!editId) return;
 
     setError(null);
     setSuccess(null);
     setSaving(true);
 
     try {
-      const res = await fetch(`/api/intervenants/${encodeURIComponent(id)}`, {
-        method: "DELETE",
+      const updated = await patchIntervenant(editId, {
+        fullName: editFullName.trim(),
+        phoneNumber: editPhoneNumber.trim() || null,
+        email: editEmail.trim() || null,
+        notes: editNotes.trim() || null,
+        isActive: editIsActive,
       });
 
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
-        throw new Error(data?.error ?? `Erreur DELETE (${res.status})`);
-      }
-
-      setSuccess(`Intervenant désactivé : ${label}`);
-      await refresh();
+      setItems((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
+      setSuccess(`Fiche mise à jour : ${updated.fullName}`);
+      setEditOpen(false);
     } catch (e: any) {
-      setError(e?.message ?? "Erreur suppression intervenant");
+      setError(e?.message ?? "Erreur modification");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(s: StaffItem) {
+    const next = !s.isActive;
+    const label = next ? "Réactiver" : "Rendre inactif";
+    if (!confirm(`${label} : ${s.fullName} ?`)) return;
+
+    setError(null);
+    setSuccess(null);
+    setSaving(true);
+
+    try {
+      const updated = await patchIntervenant(s.id, { isActive: next });
+      setItems((prev) => prev.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
+      setSuccess(next ? "Intervenant réactivé" : "Intervenant rendu inactif");
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur changement statut");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function purge(s: StaffItem) {
+    if (s.isActive) {
+      setError("Purge refusée : désactive d’abord l’intervenant (Inactif), puis purge.");
+      return;
+    }
+    if (!confirm(`SUPPRIMER DÉFINITIVEMENT : ${s.fullName} ?\n\nCette action est irréversible.`)) return;
+
+    setError(null);
+    setSuccess(null);
+    setSaving(true);
+
+    try {
+      await purgeIntervenant(s.id);
+      setItems((prev) => prev.filter((x) => x.id !== s.id));
+      setSuccess("Intervenant supprimé définitivement.");
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur purge");
     } finally {
       setSaving(false);
     }
@@ -169,7 +287,7 @@ export default function Page() {
           <div className="min-w-0">
             <div className="text-3xl font-bold truncate">Intervenants</div>
             <div className="text-slate-600 mt-1 truncate">
-              Lecture : USER + ADMIN • Ajout : ADMIN uniquement • Actifs : {activeCount}/{items.length}
+              Lecture : USER + ADMIN • Ajout/MAJ/Suppression : ADMIN • Actifs : {activeCount}/{items.length}
             </div>
           </div>
 
@@ -340,17 +458,36 @@ export default function Page() {
                       MAJ : {new Date(s.updatedAt).toLocaleString()}
                     </div>
 
-                    {s.isActive ? (
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => onDelete(s.id, s.fullName)}
-                        className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 min-h-[32px]"
+                        onClick={() => openEdit(s)}
+                        className="rounded-lg border px-3 py-1 text-xs font-semibold hover:bg-slate-50"
                         disabled={saving}
-                        title="Désactiver (soft delete)"
                       >
-                        Supprimer
+                        Modifier
                       </button>
-                    ) : null}
+
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(s)}
+                        className="rounded-lg border px-3 py-1 text-xs font-semibold hover:bg-slate-50"
+                        disabled={saving}
+                        title={s.isActive ? "Rendre inactif (congé / non assignable)" : "Réactiver (assignable)"}
+                      >
+                        {s.isActive ? "Inactif" : "Actif"}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => purge(s)}
+                        className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
+                        disabled={saving}
+                        title="Suppression définitive (purge)"
+                      >
+                        Purge
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -358,6 +495,78 @@ export default function Page() {
           )}
         </div>
       </div>
+
+      <Modal open={editOpen} title="Modifier intervenant" onClose={() => setEditOpen(false)}>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold mb-1">Nom complet *</label>
+            <input
+              value={editFullName}
+              onChange={(e) => setEditFullName(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2"
+              placeholder="ex : Prénom Nom"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Téléphone</label>
+            <input
+              value={editPhoneNumber}
+              onChange={(e) => setEditPhoneNumber(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2"
+              placeholder="06..."
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Email</label>
+            <input
+              value={editEmail}
+              onChange={(e) => setEditEmail(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2"
+              placeholder="nom@domaine.fr"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold mb-1">Notes</label>
+            <textarea
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              className="w-full rounded-xl border px-3 py-2 min-h-[120px]"
+            />
+          </div>
+
+          <label className="flex items-center gap-3">
+            <input
+              type="checkbox"
+              checked={editIsActive}
+              onChange={(e) => setEditIsActive(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <span className="text-sm font-semibold">Actif (assignable)</span>
+          </label>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              className="rounded-xl border px-4 py-2 font-semibold hover:bg-slate-50"
+              onClick={() => setEditOpen(false)}
+              disabled={saving}
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              className={`rounded-xl px-4 py-2 font-semibold hover:opacity-95 ${FOREST_BTN}`}
+              onClick={saveEdit}
+              disabled={saving}
+            >
+              {saving ? "Enregistrement…" : "Enregistrer"}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </main>
   );
 }
