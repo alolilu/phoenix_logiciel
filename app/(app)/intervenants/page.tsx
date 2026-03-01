@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-type StaffRole = "GERANT" | "TECHNICIEN" | "PRESTATAIRE";
+type StaffRole = "GERANT" | "TECHNICIEN" | "PRESTATAIRE" | "ASSISTANT" | "STAGIAIRE";
 
 type StaffItem = {
   id: string;
@@ -30,6 +30,7 @@ async function apiJSON<T>(url: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // tes API renvoient souvent du JSON {error:"..."} : on garde le texte brut
     throw new Error(text || `Erreur API (${res.status})`);
   }
 
@@ -56,7 +57,9 @@ async function createIntervenant(payload: {
 
 function roleLabel(r: StaffRole) {
   if (r === "GERANT") return "Gérant";
-  if (r === "PRESTATAIRE") return "PRESTATAIRE";
+  if (r === "PRESTATAIRE") return "Prestataire";
+  if (r === "ASSISTANT") return "Assistant";
+  if (r === "STAGIAIRE") return "Stagiaire";
   return "Technicien";
 }
 
@@ -64,6 +67,7 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const [items, setItems] = useState<StaffItem[]>([]);
 
@@ -94,9 +98,10 @@ export default function Page() {
 
   async function onCreate() {
     setError(null);
+    setSuccess(null);
 
     const name = fullName.trim();
-    if (!name) return setError(`{"error":"fullName requis"}`);
+    if (!name) return setError("fullName requis");
 
     setSaving(true);
     try {
@@ -112,6 +117,8 @@ export default function Page() {
       // Ajoute en haut
       setItems((prev) => [created, ...prev]);
 
+      setSuccess(`Intervenant créé : ${created.fullName}`);
+
       // reset form
       setFullName("");
       setPhoneNumber("");
@@ -121,6 +128,33 @@ export default function Page() {
       setIsActive(true);
     } catch (e: any) {
       setError(e?.message ?? "Erreur inconnue");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function onDelete(id: string, label: string) {
+    if (!confirm(`Supprimer (désactiver) l’intervenant : ${label} ?`)) return;
+
+    setError(null);
+    setSuccess(null);
+    setSaving(true);
+
+    try {
+      const res = await fetch(`/api/intervenants/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(data?.error ?? `Erreur DELETE (${res.status})`);
+      }
+
+      setSuccess(`Intervenant désactivé : ${label}`);
+      await refresh();
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur suppression intervenant");
     } finally {
       setSaving(false);
     }
@@ -157,6 +191,13 @@ export default function Page() {
           </div>
         ) : null}
 
+        {success ? (
+          <div className="rounded-2xl border border-green-200 bg-green-50 px-5 py-4 text-green-900">
+            <div className="font-semibold">OK</div>
+            <div className="text-sm mt-1 whitespace-pre-wrap">{success}</div>
+          </div>
+        ) : null}
+
         {/* Form */}
         <div className="rounded-2xl border bg-white p-6 shadow-sm">
           <div className="text-xl font-bold mb-4">Ajouter un intervenant</div>
@@ -174,9 +215,14 @@ export default function Page() {
 
             <div>
               <label className="block text-sm font-semibold mb-1">Rôle</label>
-              <select value={role} onChange={(e) => setRole(e.target.value as StaffRole)} className="w-full rounded-xl border px-3 py-2">
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value as StaffRole)}
+                className="w-full rounded-xl border px-3 py-2"
+              >
                 <option value="GERANT">Gérant</option>
                 <option value="TECHNICIEN">Technicien</option>
+                <option value="PRESTATAIRE">Prestataire</option>
                 <option value="ASSISTANT">Assistant</option>
                 <option value="STAGIAIRE">Stagiaire</option>
               </select>
@@ -204,11 +250,21 @@ export default function Page() {
 
             <div className="md:col-span-2">
               <label className="block text-sm font-semibold mb-1">Notes</label>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full rounded-xl border px-3 py-2 min-h-[90px]" />
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full rounded-xl border px-3 py-2 min-h-[90px]"
+              />
             </div>
 
             <div className="flex items-center gap-3">
-              <input id="active" type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4" />
+              <input
+                id="active"
+                type="checkbox"
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
+                className="h-4 w-4"
+              />
               <label htmlFor="active" className="text-sm font-semibold">
                 Actif
               </label>
@@ -220,6 +276,8 @@ export default function Page() {
               type="button"
               className={`rounded-xl px-4 py-2 font-semibold hover:opacity-95 ${COPPER_BTN}`}
               onClick={() => {
+                setError(null);
+                setSuccess(null);
                 setFullName("");
                 setPhoneNumber("");
                 setEmail("");
@@ -232,7 +290,12 @@ export default function Page() {
               Effacer
             </button>
 
-            <button type="button" className={`rounded-xl px-4 py-2 font-semibold hover:opacity-95 ${FOREST_BTN}`} onClick={onCreate} disabled={saving}>
+            <button
+              type="button"
+              className={`rounded-xl px-4 py-2 font-semibold hover:opacity-95 ${FOREST_BTN}`}
+              onClick={onCreate}
+              disabled={saving}
+            >
               {saving ? "Création…" : "Créer"}
             </button>
           </div>
@@ -272,8 +335,22 @@ export default function Page() {
                     </div>
                   </div>
 
-                  <div className="text-xs text-slate-500 whitespace-nowrap">
-                    MAJ : {new Date(s.updatedAt).toLocaleString()}
+                  <div className="shrink-0 flex flex-col items-end gap-2 whitespace-nowrap">
+                    <div className="text-xs text-slate-500">
+                      MAJ : {new Date(s.updatedAt).toLocaleString()}
+                    </div>
+
+                    {s.isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(s.id, s.fullName)}
+                        className="rounded-lg border border-red-200 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 min-h-[32px]"
+                        disabled={saving}
+                        title="Désactiver (soft delete)"
+                      >
+                        Supprimer
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ))}
