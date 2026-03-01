@@ -20,10 +20,15 @@ function splitFullName(fullName: string) {
   return { firstName, lastName };
 }
 
+function requireAdmin(auth: any) {
+  return auth?.role === "ADMIN";
+}
+
 // ✅ PATCH: ADMIN only
 export async function PATCH(req: NextRequest) {
   const auth = await requireWriteAccess(req);
   if (!auth.ok) return json({ error: auth.error }, auth.status);
+  if (!requireAdmin(auth)) return json({ error: "Accès refusé (ADMIN requis)." }, 403);
 
   const id = getIdFromUrl(req);
   if (!id) return json({ error: "ID manquant" }, 400);
@@ -31,11 +36,17 @@ export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") return json({ error: "Body JSON invalide" }, 400);
 
-  const fullName = (body as any).fullName !== undefined ? String((body as any).fullName ?? "").trim() : undefined;
+  const fullName =
+    (body as any).fullName !== undefined ? String((body as any).fullName ?? "").trim() : undefined;
 
-  const phoneNumber = (body as any).phoneNumber !== undefined ? String((body as any).phoneNumber ?? "").trim() : undefined;
-  const notes = (body as any).notes !== undefined ? String((body as any).notes ?? "").trim() : undefined;
-  const isActive = (body as any).isActive !== undefined ? Boolean((body as any).isActive) : undefined;
+  const phoneNumber =
+    (body as any).phoneNumber !== undefined ? String((body as any).phoneNumber ?? "").trim() : undefined;
+
+  const notes =
+    (body as any).notes !== undefined ? String((body as any).notes ?? "").trim() : undefined;
+
+  const isActive =
+    (body as any).isActive !== undefined ? Boolean((body as any).isActive) : undefined;
 
   const data: any = {};
 
@@ -51,35 +62,52 @@ export async function PATCH(req: NextRequest) {
   if (notes !== undefined) data.notes = notes || null;
   if (isActive !== undefined) data.isActive = isActive;
 
-  const updated = await prisma.staffMember.update({
-    where: { id },
-    data,
-  });
+  try {
+    const updated = await prisma.staffMember.update({
+      where: { id },
+      data,
+    });
 
-  return json(
-    {
-      id: updated.id,
-      fullName: `${updated.firstName} ${updated.lastName}`.trim(),
-      phoneNumber: updated.phoneNumber,
-      notes: updated.notes,
-      isActive: updated.isActive,
-    },
-    200
-  );
+    return json(
+      {
+        id: updated.id,
+        fullName: `${updated.firstName} ${updated.lastName}`.trim(),
+        phoneNumber: updated.phoneNumber,
+        notes: updated.notes,
+        isActive: updated.isActive,
+      },
+      200
+    );
+  } catch (e: any) {
+    return json(
+      { error: e?.message ? `Erreur mise à jour intervenant : ${e.message}` : "Erreur mise à jour intervenant." },
+      500
+    );
+  }
 }
 
 // ✅ DELETE: soft delete (ADMIN only)
 export async function DELETE(req: NextRequest) {
   const auth = await requireWriteAccess(req);
   if (!auth.ok) return json({ error: auth.error }, auth.status);
+  if (!requireAdmin(auth)) return json({ error: "Accès refusé (ADMIN requis)." }, 403);
 
   const id = getIdFromUrl(req);
   if (!id) return json({ error: "ID manquant" }, 400);
 
-  const updated = await prisma.staffMember.update({
-    where: { id },
-    data: { isActive: false },
-  });
+  try {
+    // soft delete = désactivation
+    const updated = await prisma.staffMember.update({
+      where: { id },
+      data: { isActive: false },
+      select: { id: true },
+    });
 
-  return json({ ok: true, id: updated.id }, 200);
+    return json({ ok: true, id: updated.id }, 200);
+  } catch (e: any) {
+    return json(
+      { error: e?.message ? `Erreur suppression intervenant : ${e.message}` : "Erreur suppression intervenant." },
+      500
+    );
+  }
 }
