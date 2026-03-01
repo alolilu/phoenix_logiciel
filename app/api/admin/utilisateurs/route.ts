@@ -144,105 +144,57 @@ export async function POST(req: NextRequest) {
   return json(created, 201);
 }
 
-// PUT /api/admin/utilisateurs?id=...  (ADMIN) => modifier user
-export async function PUT(req: NextRequest) {
-  const auth = await requireWriteAccess(req);
-  if (!auth.ok) return json({ error: auth.error }, auth.status);
-
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
-  if (!id) return badRequest("id manquant");
-
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object") return badRequest("Body JSON invalide");
-
-  const data: any = {};
-
-  // username: accepte aussi "identifiant"
-  if ((body as any).username !== undefined || (body as any).identifiant !== undefined) {
-    const raw = (body as any).username ?? (body as any).identifiant ?? "";
-    const username = String(raw).trim();
-    if (!username) return badRequest("username invalide");
-    data.username = username;
-  }
-
-  // email: optionnel. Si fourni => valide
-  if ((body as any).email !== undefined) {
-    const emailRaw = (body as any).email;
-if (typeof emailRaw !== "string" || !emailRaw.trim()) return badRequest("email requis");
-const email = emailRaw.trim().toLowerCase();
-    if (email) {
-      const looksLikeEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-      if (!looksLikeEmail) return badRequest("email invalide");
-      data.email = email;
-    } else {
-      // si tu veux permettre "vider email"
-      data.email = null; // ⚠️ nécessite que ton schéma Prisma autorise null
-    }
-  }
-
-  if ((body as any).role !== undefined) {
-    data.role = normalizeRole((body as any).role);
-  }
-
-  if ((body as any).isActive !== undefined) {
-    if (typeof (body as any).isActive !== "boolean") return badRequest("isActive invalide");
-    data.isActive = (body as any).isActive;
-  }
-
-  if ((body as any).password !== undefined) {
-    const password = String((body as any).password ?? "");
-    if (!password || password.length < 8) return badRequest("password min 8 caractères");
-    data.passwordHash = await bcrypt.hash(password, 10);
-  }
-
-  // Vérif doublon si email/username changent
-  if (data.email !== undefined || data.username) {
-    const or: any[] = [];
-    if (data.username) or.push({ username: data.username });
-    // ne check email que si défini ET non null/empty
-    if (data.email) or.push({ email: data.email });
-
-    if (or.length) {
-      const other = await prisma.userAccount.findFirst({
-        where: {
-          AND: [
-            { id: { not: id } },
-            { OR: or },
-          ],
-        },
-        select: { id: true },
-      });
-      if (other) return json({ error: "username ou email déjà utilisé" }, 409);
-    }
-  }
-
-  const updated = await prisma.userAccount.update({
-    where: { id },
-    data,
-    select: {
-      id: true,
-      username: true,
-      email: true,
-      role: true,
-      isActive: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
-
-  return json(updated, 200);
-}
-
 // DELETE /api/admin/utilisateurs?id=... (ADMIN)
 export async function DELETE(req: NextRequest) {
   const auth = await requireWriteAccess(req);
   if (!auth.ok) return json({ error: auth.error }, auth.status);
 
+  // ✅ Seul ADMIN
+  if (auth.role !== "ADMIN") {
+    return json({ error: "Accès refusé (ADMIN requis)." }, 403);
+  }
+
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (!id) return badRequest("id manquant");
 
-  await prisma.userAccount.delete({ where: { id } });
-  return json({ ok: true }, 200);
+  // ✅ Interdire suppression de soi-même
+  if (auth.userId === id) {
+    return json({ error: "Impossible de supprimer votre propre compte." }, 400);
+  }
+
+  // ✅ Vérifier existence + rôle cible
+  const target = await prisma.userAccount.findUnique({
+    where: { id },
+    select: { id: true, role: true, isActive: true },
+  });
+
+  if (!target) {
+    return json({ error: "Utilisateur introuvable." }, 404);
+  }
+
+  // ✅ Empêcher suppression si c’est le dernier ADMIN actif
+  if (target.role === "ADMIN" && target.isActive) {
+    const adminCount = await prisma.userAccount.count({
+      where: { role: "ADMIN", isActive: true },
+    });
+
+    if (adminCount <= 1) {
+      return json(
+        { error: "Suppression impossible : c’est le dernier administrateur actif." },
+        409
+      );
+    }
+  }
+
+  try {
+    // ✅ Suppression réelle en base
+    await prisma.userAccount.delete({ where: { id } });
+    return json({ ok: true }, 200);
+  } catch (e: any) {
+    return json(
+      { error: e?.message ? `Échec suppression utilisateur : ${e.message}` : "Échec suppression utilisateur." },
+      500
+    );
+  }
 }
