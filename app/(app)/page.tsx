@@ -100,6 +100,7 @@ type StaffDto = {
   phoneNumber: string | null;
   notes: string | null;
   fullName: string;
+  isActive: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -1186,7 +1187,9 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {staff.map((m) => {
+                {staff
+  .filter((m) => m.isActive !== false)
+  .map((m) => {
                   const label = m.fullName || `${m.firstName} ${m.lastName}`.trim();
                   const checked = formIntervenants.includes(label);
 
