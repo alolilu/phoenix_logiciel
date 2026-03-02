@@ -637,6 +637,19 @@ export default function Page() {
   const [formStatus, setFormStatus] = useState<ChantierStatus>("EN_ATTENTE");
   const [formArchived, setFormArchived] = useState(false);
   const [formIntervenants, setFormIntervenants] = useState<string[]>([]);
+  const inactiveAssigned = useMemo(() => {
+  if (!Array.isArray(formIntervenants) || formIntervenants.length === 0) return [];
+  if (!Array.isArray(staff) || staff.length === 0) return [];
+
+  const inactiveNames = new Set(
+    staff
+      .filter((m) => m.isActive === false)
+      .map((m) => (m.fullName || `${m.firstName} ${m.lastName}`.trim()).trim())
+      .filter(Boolean)
+  );
+
+  return formIntervenants.filter((name) => inactiveNames.has(String(name).trim()));
+}, [formIntervenants, staff]);
 
   // ✅ Notes intervenant (sans bloc client)
   const [formNotes, setFormNotes] = useState("");
@@ -1180,6 +1193,18 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
                 {staffLoading ? "Chargement…" : "Rafraîchir"}
               </button>
             </div>
+            {inactiveAssigned.length > 0 ? (
+  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+    <div className="font-semibold">Attention</div>
+    <div className="mt-1">
+      Intervenant(s) inactif(s) encore assigné(s) à ce chantier :
+      <span className="font-semibold"> {inactiveAssigned.join(", ")}</span>
+    </div>
+    <div className="mt-1 text-amber-800">
+      (Historique conservé. Retire-les si tu ne veux plus qu’ils apparaissent sur ce chantier.)
+    </div>
+  </div>
+) : null}
 
             {staff.length === 0 ? (
               <div className="rounded-xl border bg-slate-50 p-3 text-sm text-slate-700">
