@@ -758,6 +758,7 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormEnd(d);
     setFormStatus("EN_ATTENTE");
     setFormArchived(false);
+    setFormIntervenants([]);
     setFormRecurrenceFrequency("NONE");
     setFormRecurrenceEndDate(d);
 
@@ -851,10 +852,14 @@ if (
         : null,
   });
 
-  await refresh(); // ✅ recharge toutes les occurrences
+  // ✅ recharge toute la liste pour récupérer toutes les occurrences générées
+  await refresh();
+
   setEditingId(created.id);
   await refreshPhotos(created.id);
-} else {
+  }
+
+  else {
         const updated = await updateChantier(editingId, {
   type: formType,
   title,
