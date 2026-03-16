@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { requireReadAccess, requireWriteAccess } from "@/lib/rbac";
+import crypto from "node:crypto";
 /** ========= Helpers dates ========= */
 
 function pad2(n: number) {
@@ -25,6 +26,30 @@ function dateOnlyToStartUTC(iso: string) {
 
 function dateOnlyToEndUTC(iso: string) {
   return new Date(`${iso}T23:59:59.999Z`);
+}
+
+function addDaysUTC(d: Date, days: number) {
+  const x = new Date(d);
+  x.setUTCDate(x.getUTCDate() + days);
+  return x;
+}
+
+function addMonthsUTC(d: Date, months: number) {
+  const x = new Date(d);
+  x.setUTCMonth(x.getUTCMonth() + months);
+  return x;
+}
+
+function sameOrBefore(a: Date, b: Date) {
+  return a.getTime() <= b.getTime();
+}
+
+function startOfUtcDay(d: Date) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0));
+}
+
+function endOfUtcDay(d: Date) {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
 }
 
 /** ========= Helpers type ========= */
@@ -52,6 +77,7 @@ function mapUITypeToEnum(typeLabel: string) {
   if (k === "nebulisation") return "NEBULISATION";
   if (k === "scene de crime") return "SCENE_DE_CRIME";
   if (k === "devis") return "DEVIS";
+  if (k === "nettoyage de bureau") return "NETTOYAGE_BUREAU";
 
   return "DEVIS";
 }
@@ -246,7 +272,111 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
       ? (body as any).intervenants
       : [];
 
-    const created = await prisma.jobItem.create({
+        const recurrenceFrequency = String((body as any).recurrenceFrequency ?? "NONE").toUpperCase();
+    const recurrenceEndDateRaw = (body as any).recurrenceEndDate
+      ? String((body as any).recurrenceEndDate)
+      : null;
+
+    // intervenants labels reçus du front
+    const intervenantLabels: string[] = Array.isArray((body as any).intervenants)
+      ? (body as any).intervenants
+      : [];
+
+    async function attachIntervenants(jobId: string, labels: string[]) {
+      for (const label of labels) {
+        const trimmed = String(label ?? "").trim();
+        if (!trimmed) continue;
+
+        const parts = trimmed.split(" ").filter(Boolean);
+        const lastName = parts.length >= 2 ? parts[parts.length - 1] : trimmed;
+        const firstName = parts.length >= 2 ? parts.slice(0, -1).join(" ") : "";
+
+        const staff = await prisma.staffMember.findFirst({
+          where: {
+            AND: [
+              firstName ? { firstName: { equals: firstName, mode: "insensitive" } } : {},
+              { lastName: { equals: lastName, mode: "insensitive" } },
+              { isActive: true },
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (!staff) continue;
+
+        await prisma.jobAssignment.create({
+          data: { jobId, staffId: staff.id },
+        });
+      }
+    }
+
+    // ✅ Cas standard non récurrent
+    if (recurrenceFrequency === "NONE") {
+      const created = await prisma.jobItem.create({
+        data: {
+          title,
+          type: typeEnum as any,
+          status: status as any,
+          startAt,
+          endAt,
+          notes,
+          createdById: dbUser.id,
+          archivedAt: null,
+          archivedById: null,
+          archived: false,
+          recurrenceFrequency: "NONE",
+          recurrenceInterval: 0,
+          recurrenceDayOfWeek: null,
+          recurrenceStartDate: null,
+          recurrenceEndDate: null,
+          recurrenceGroupId: null,
+          isRecurringTemplate: false,
+        },
+        include: { staffLinks: { include: { staff: true } } },
+      });
+
+      await attachIntervenants(created.id, intervenantLabels);
+
+      const createdWithLinks = await prisma.jobItem.findUniqueOrThrow({
+        where: { id: created.id },
+        include: { staffLinks: { include: { staff: true } } },
+      });
+
+      await logAudit({
+        req,
+        actorUserId: dbUser.id,
+        actorUsername: dbUser.username,
+        entityType: AuditEntityType.JOB,
+        entityId: created.id,
+        action: AuditAction.CREATE,
+        message: "Création chantier",
+      });
+
+      const ui = await jobItemToUI(createdWithLinks);
+      return NextResponse.json(ui, { status: 201 });
+    }
+
+    // ✅ Cas récurrent (nettoyage de bureau)
+    if (typeEnum !== "NETTOYAGE_BUREAU") {
+      return badRequest("La récurrence est réservée au type Nettoyage de bureau.");
+    }
+
+    if (!recurrenceEndDateRaw) {
+      return badRequest("recurrenceEndDate manquante pour un chantier récurrent.");
+    }
+
+    const recurrenceStartDate = startOfUtcDay(startAt);
+    const recurrenceEndDate = endOfUtcDay(dateOnlyToStartUTC(recurrenceEndDateRaw));
+
+    if (!sameOrBefore(recurrenceStartDate, recurrenceEndDate)) {
+      return badRequest("recurrenceEndDate doit être >= startDate.");
+    }
+
+    const durationMs = endAt.getTime() - startAt.getTime();
+    const recurrenceGroupId = crypto.randomUUID();
+
+    // 1) créer le template
+    const template = await prisma.jobItem.create({
       data: {
         title,
         type: typeEnum as any,
@@ -258,22 +388,78 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
         archivedAt: null,
         archivedById: null,
         archived: false,
+        recurrenceFrequency: recurrenceFrequency as any,
+        recurrenceInterval: recurrenceFrequency === "BIWEEKLY" ? 14 : recurrenceFrequency === "WEEKLY" ? 7 : 1,
+        recurrenceDayOfWeek: startAt.getUTCDay(),
+        recurrenceStartDate,
+        recurrenceEndDate,
+        recurrenceGroupId,
+        isRecurringTemplate: true,
       },
       include: { staffLinks: { include: { staff: true } } },
     });
 
-    // ✅ LOG AUDIT CREATE
+    await attachIntervenants(template.id, intervenantLabels);
+
+    // 2) générer les occurrences
+    const createdOccurrences: string[] = [];
+    let cursorStart = new Date(startAt);
+
+    while (sameOrBefore(startOfUtcDay(cursorStart), recurrenceEndDate)) {
+      const cursorEnd = new Date(cursorStart.getTime() + durationMs);
+
+      const occurrence = await prisma.jobItem.create({
+        data: {
+          title,
+          type: typeEnum as any,
+          status: status as any,
+          startAt: cursorStart,
+          endAt: cursorEnd,
+          notes,
+          createdById: dbUser.id,
+          archivedAt: null,
+          archivedById: null,
+          archived: false,
+          recurrenceFrequency: recurrenceFrequency as any,
+          recurrenceInterval: recurrenceFrequency === "BIWEEKLY" ? 14 : recurrenceFrequency === "WEEKLY" ? 7 : 1,
+          recurrenceDayOfWeek: cursorStart.getUTCDay(),
+          recurrenceStartDate,
+          recurrenceEndDate,
+          recurrenceGroupId,
+          isRecurringTemplate: false,
+        },
+      });
+
+      await attachIntervenants(occurrence.id, intervenantLabels);
+      createdOccurrences.push(occurrence.id);
+
+      if (recurrenceFrequency === "WEEKLY") {
+        cursorStart = addDaysUTC(cursorStart, 7);
+      } else if (recurrenceFrequency === "BIWEEKLY") {
+        cursorStart = addDaysUTC(cursorStart, 14);
+      } else if (recurrenceFrequency === "MONTHLY") {
+        cursorStart = addMonthsUTC(cursorStart, 1);
+      } else {
+        break;
+      }
+    }
+
     await logAudit({
       req,
       actorUserId: dbUser.id,
       actorUsername: dbUser.username,
       entityType: AuditEntityType.JOB,
-      entityId: created.id,
+      entityId: template.id,
       action: AuditAction.CREATE,
-      message: "Création chantier",
+      message: `Création chantier récurrent (${createdOccurrences.length} occurrence(s))`,
     });
 
-    const ui = await jobItemToUI(created);
+    const templateWithLinks = await prisma.jobItem.findUniqueOrThrow({
+      where: { id: template.id },
+      include: { staffLinks: { include: { staff: true } } },
+    });
+
+    const ui = await jobItemToUI(templateWithLinks);
     return NextResponse.json(ui, { status: 201 });
 
   } catch (e: any) {
