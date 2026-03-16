@@ -58,6 +58,7 @@ const CHANTIER_COLORS: Record<string, string> = {
   ozone: "#0F766E",
   nebulisation: "#0EA5E9",
   devis: "#6B7280",
+  "nettoyage de bureau": "#16A34A",
 };
 
 function getChantierColor(typeLabel: string) {
@@ -74,11 +75,13 @@ const CHANTIER_TYPES = [
   "Scène de crime",
   "Devis",
   "Débarras",
+  "Nettoyage de bureau","Nettoyage de bureau",
 ] as const;
 
 type ChantierType = (typeof CHANTIER_TYPES)[number];
 type ChantierStatus = "EN_ATTENTE" | "EN_COURS" | "TERMINE";
 type ViewMode = "jour" | "semaine" | "mois";
+type RecurrenceFrequency = "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
 
 type ChantierEvent = {
   id: string;
@@ -90,6 +93,8 @@ type ChantierEvent = {
   archived: boolean;
   intervenants: string[];
   notes?: string; // contient [[CLIENT]]... + notes intervenant
+  recurrenceFrequency?: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+  recurrenceEndDate?: string | null;
   updatedAt?: string;
 };
 
@@ -637,6 +642,8 @@ export default function Page() {
   const [formStatus, setFormStatus] = useState<ChantierStatus>("EN_ATTENTE");
   const [formArchived, setFormArchived] = useState(false);
   const [formIntervenants, setFormIntervenants] = useState<string[]>([]);
+  const [formRecurrenceFrequency, setFormRecurrenceFrequency] = useState<RecurrenceFrequency>("NONE");
+  const [formRecurrenceEndDate, setFormRecurrenceEndDate] = useState("");
   const inactiveAssigned = useMemo(() => {
   if (!Array.isArray(formIntervenants) || formIntervenants.length === 0) return [];
   if (!Array.isArray(staff) || staff.length === 0) return [];
@@ -750,7 +757,8 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormEnd(d);
     setFormStatus("EN_ATTENTE");
     setFormArchived(false);
-    setFormIntervenants([]);
+    setFormRecurrenceFrequency("NONE");
+    setFormRecurrenceEndDate(d);
 
     // notes & client
     setFormNotes("");
@@ -777,6 +785,8 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormStatus(ev.status);
     setFormArchived(ev.archived);
     setFormIntervenants(ev.intervenants?.length ? ev.intervenants : []);
+    setFormRecurrenceFrequency("NONE");
+    setFormRecurrenceEndDate(ev.endDate);
 
     // ✅ split notes -> client + restNotes
     const { client, restNotes } = extractClientBlock(ev.notes ?? "");
@@ -798,6 +808,21 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     const title = formTitle.trim();
     if (!title) return window.alert("Le titre est obligatoire.");
     if (formEnd < formStart) return window.alert("La date de fin doit être >= date de début.");
+    if (
+  formType === "Nettoyage de bureau" &&
+  formRecurrenceFrequency !== "NONE" &&
+  !formRecurrenceEndDate
+) {
+  return window.alert("La date de fin de récurrence est obligatoire.");
+}
+
+if (
+  formType === "Nettoyage de bureau" &&
+  formRecurrenceFrequency !== "NONE" &&
+  formRecurrenceEndDate < formStart
+) {
+  return window.alert("La date de fin de récurrence doit être >= à la date de début.");
+}
 
     // ✅ rebuild notes with client block
     const notesPacked = buildNotesWithClient(
@@ -809,15 +834,21 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     try {
       if (!editingId) {
         const created = await createChantier({
-          type: formType,
-          title,
-          startDate: formStart,
-          endDate: formEnd,
-          status: formStatus,
-          archived: formArchived,
-          intervenants: formIntervenants,
-          notes: notesPacked,
-        });
+  type: formType,
+  title,
+  startDate: formStart,
+  endDate: formEnd,
+  status: formStatus,
+  archived: formArchived,
+  intervenants: formIntervenants,
+  notes: notesPacked,
+  recurrenceFrequency:
+    formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
+  recurrenceEndDate:
+    formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
+      ? formRecurrenceEndDate
+      : null,
+});
 
         if (!created.archived) setEvents((prev) => [created, ...prev]);
 
@@ -826,15 +857,21 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
         await refreshPhotos(created.id);
       } else {
         const updated = await updateChantier(editingId, {
-          type: formType,
-          title,
-          startDate: formStart,
-          endDate: formEnd,
-          status: formStatus,
-          archived: formArchived,
-          intervenants: formIntervenants,
-          notes: notesPacked,
-        });
+  type: formType,
+  title,
+  startDate: formStart,
+  endDate: formEnd,
+  status: formStatus,
+  archived: formArchived,
+  intervenants: formIntervenants,
+  notes: notesPacked,
+  recurrenceFrequency:
+    formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
+  recurrenceEndDate:
+    formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
+      ? formRecurrenceEndDate
+      : null,
+});
 
         setEvents((prev) => {
           const filtered = prev.filter((e) => e.id !== updated.id);
@@ -1157,6 +1194,43 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
               className="w-full rounded-xl border px-3 py-2"
             />
           </div>
+          {formType === "Nettoyage de bureau" ? (
+  <div className="rounded-2xl border bg-white p-4">
+    <div className="font-semibold mb-3">Récurrence bureau</div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div>
+        <label className="block text-sm font-semibold mb-1">Fréquence</label>
+        <select
+          value={formRecurrenceFrequency}
+          onChange={(e) => setFormRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
+          className="w-full rounded-xl border px-3 py-2"
+        >
+          <option value="NONE">Aucune (ponctuel)</option>
+          <option value="WEEKLY">Chaque semaine</option>
+          <option value="BIWEEKLY">Toutes les 2 semaines</option>
+          <option value="MONTHLY">Chaque mois</option>
+        </select>
+      </div>
+
+      {formRecurrenceFrequency !== "NONE" ? (
+        <div>
+          <label className="block text-sm font-semibold mb-1">Récurrence jusqu’au</label>
+          <input
+            type="date"
+            value={formRecurrenceEndDate}
+            onChange={(e) => setFormRecurrenceEndDate(e.target.value)}
+            className="w-full rounded-xl border px-3 py-2"
+          />
+        </div>
+      ) : null}
+    </div>
+
+    <div className="text-xs text-slate-500 mt-2">
+      Pour un contrat régulier, choisis une fréquence et une date de fin. Pour une intervention ponctuelle, laisse “Aucune”.
+    </div>
+  </div>
+) : null}
 
           {/* ✅ Coordonnées client */}
           <div className="rounded-2xl border bg-white p-4">
