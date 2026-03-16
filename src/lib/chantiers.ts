@@ -59,6 +59,7 @@ export function mapEnumToLabel(type: JobType): string {
     NEBULISATION: "Nébulisation",
     SCENE_DE_CRIME: "Scène de crime",
     DEVIS: "Devis",
+    NETTOYAGE_BUREAU: "Nettoyage de bureau",
   };
   return m[type] ?? "Diogène";
 }
