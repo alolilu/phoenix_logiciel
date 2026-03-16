@@ -42,7 +42,8 @@ export function mapTypeToEnum(typeLabel: string): JobType {
   if (t === "nébulisation" || t === "nebulisation") return JobType.NEBULISATION;
   if (t === "scène de crime" || t === "scene de crime") return JobType.SCENE_DE_CRIME;
   if (t === "devis") return JobType.DEVIS;
-
+  if (t === "nettoyage bureau" || t === "nettoyage de bureau")
+  return JobType.NETTOYAGE_BUREAU;
   return JobType.DIOGENE;
 }
 
