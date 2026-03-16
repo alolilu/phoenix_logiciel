@@ -125,6 +125,20 @@ async function getDbUserFromSession(session: any) {
 }
 
 /** ========= Mapper DB -> UI ========= */
+function mapEnumTypeToUILabel(typeEnum: string) {
+  if (typeEnum === "DIOGENE") return "Diogène";
+  if (typeEnum === "POST_MORTEM") return "Post-mortem";
+  if (typeEnum === "NOE") return "Noé";
+  if (typeEnum === "DERATISATION") return "Dératisation";
+  if (typeEnum === "DESINSECTISATION") return "Désinsectisation";
+  if (typeEnum === "DEBARRAS") return "Débarras";
+  if (typeEnum === "OZONE") return "Ozone";
+  if (typeEnum === "NEBULISATION") return "Nébulisation";
+  if (typeEnum === "SCENE_DE_CRIME") return "Scène de crime";
+  if (typeEnum === "DEVIS") return "Devis";
+  if (typeEnum === "NETTOYAGE_BUREAU") return "Nettoyage de bureau";
+  return String(typeEnum);
+}
 
 async function jobItemToUI(item: any) {
   const startISO = toISODateUTC(new Date(item.startAt));
@@ -139,7 +153,7 @@ async function jobItemToUI(item: any) {
 
   return {
     id: item.id,
-    type: item.type,
+    type: mapEnumTypeToUILabel(String(item.type)), // ✅ UI label
     title: item.title,
     startDate: startISO,
     endDate: endISO,
@@ -147,6 +161,10 @@ async function jobItemToUI(item: any) {
     archived: Boolean(item.archivedAt),
     intervenants,
     notes: item.notes ?? undefined,
+    recurrenceFrequency: item.recurrenceFrequency ?? "NONE",
+    recurrenceEndDate: item.recurrenceEndDate ? toISODateUTC(new Date(item.recurrenceEndDate)) : null,
+    isRecurringTemplate: Boolean(item.isRecurringTemplate),
+    recurrenceGroupId: item.recurrenceGroupId ?? null,
     updatedAt: item.updatedAt?.toISOString?.() ?? item.updatedAt,
   };
 }
@@ -170,7 +188,9 @@ if (!dbUser.isActive) return NextResponse.json({ error: "User disabled" }, { sta
 
     const archived = parseArchived(req);
 
-    const where: any = {};
+    const where: any = {
+  isRecurringTemplate: false,
+};
     if (archived === true) where.archivedAt = { not: null };
     if (archived === false) where.archivedAt = null;
 

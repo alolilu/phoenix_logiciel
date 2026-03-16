@@ -95,7 +95,8 @@ type ChantierEvent = {
   notes?: string; // contient [[CLIENT]]... + notes intervenant
   recurrenceFrequency?: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
   recurrenceEndDate?: string | null;
-  updatedAt?: string;
+  isRecurringTemplate?: boolean;
+  recurrenceGroupId?: string | null;
 };
 
 type StaffDto = {
@@ -785,8 +786,8 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormStatus(ev.status);
     setFormArchived(ev.archived);
     setFormIntervenants(ev.intervenants?.length ? ev.intervenants : []);
-    setFormRecurrenceFrequency("NONE");
-    setFormRecurrenceEndDate(ev.endDate);
+    setFormRecurrenceFrequency((ev.recurrenceFrequency as RecurrenceFrequency) ?? "NONE");
+    setFormRecurrenceEndDate(ev.recurrenceEndDate ?? ev.endDate);
 
     // ✅ split notes -> client + restNotes
     const { client, restNotes } = extractClientBlock(ev.notes ?? "");
@@ -833,29 +834,27 @@ if (
     setSaving(true);
     try {
       if (!editingId) {
-        const created = await createChantier({
-  type: formType,
-  title,
-  startDate: formStart,
-  endDate: formEnd,
-  status: formStatus,
-  archived: formArchived,
-  intervenants: formIntervenants,
-  notes: notesPacked,
-  recurrenceFrequency:
-    formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
-  recurrenceEndDate:
-    formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
-      ? formRecurrenceEndDate
-      : null,
-});
+  const created = await createChantier({
+    type: formType,
+    title,
+    startDate: formStart,
+    endDate: formEnd,
+    status: formStatus,
+    archived: formArchived,
+    intervenants: formIntervenants,
+    notes: notesPacked,
+    recurrenceFrequency:
+      formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
+    recurrenceEndDate:
+      formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
+        ? formRecurrenceEndDate
+        : null,
+  });
 
-        if (!created.archived) setEvents((prev) => [created, ...prev]);
-
-        // ✅ maintenant on a un id => on peut charger les photos (vide)
-        setEditingId(created.id);
-        await refreshPhotos(created.id);
-      } else {
+  await refresh(); // ✅ recharge toutes les occurrences
+  setEditingId(created.id);
+  await refreshPhotos(created.id);
+} else {
         const updated = await updateChantier(editingId, {
   type: formType,
   title,
@@ -873,12 +872,8 @@ if (
       : null,
 });
 
-        setEvents((prev) => {
-          const filtered = prev.filter((e) => e.id !== updated.id);
-          return updated.archived ? filtered : [updated, ...filtered];
-        });
-
-        await refreshPhotos(updated.id);
+        await refresh(); // ✅ évite les incohérences type/récurrence
+await refreshPhotos(updated.id);
       }
 
       setModalOpen(false);
