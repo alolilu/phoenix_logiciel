@@ -46,6 +46,7 @@ function normalizeType(type: string) {
 
 function mapUITypeToEnum(typeLabel: string) {
   const k = normalizeType(typeLabel);
+
   if (k === "diogene") return "DIOGENE";
   if (k === "post-mortem") return "POST_MORTEM";
   if (k === "noe") return "NOE";
@@ -56,6 +57,8 @@ function mapUITypeToEnum(typeLabel: string) {
   if (k === "nebulisation") return "NEBULISATION";
   if (k === "scene de crime") return "SCENE_DE_CRIME";
   if (k === "devis") return "DEVIS";
+  if (k === "nettoyage de bureau" || k === "nettoyage bureau") return "NETTOYAGE_BUREAU";
+
   return "DEVIS";
 }
 

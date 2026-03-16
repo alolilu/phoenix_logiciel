@@ -77,7 +77,7 @@ function mapUITypeToEnum(typeLabel: string) {
   if (k === "nebulisation") return "NEBULISATION";
   if (k === "scene de crime") return "SCENE_DE_CRIME";
   if (k === "devis") return "DEVIS";
-  if (k === "nettoyage de bureau") return "NETTOYAGE_BUREAU";
+  if (k === "nettoyage de bureau" || k === "nettoyage bureau") return "NETTOYAGE_BUREAU";
 
   return "DEVIS";
 }
