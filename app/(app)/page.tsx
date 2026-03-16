@@ -75,7 +75,7 @@ const CHANTIER_TYPES = [
   "Scène de crime",
   "Devis",
   "Débarras",
-  "Nettoyage de bureau","Nettoyage de bureau",
+  "Nettoyage de bureau",
 ] as const;
 
 type ChantierType = (typeof CHANTIER_TYPES)[number];
