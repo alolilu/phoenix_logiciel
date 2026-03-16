@@ -92,11 +92,12 @@ type ChantierEvent = {
   status: ChantierStatus;
   archived: boolean;
   intervenants: string[];
-  notes?: string; // contient [[CLIENT]]... + notes intervenant
+  notes?: string;
   recurrenceFrequency?: "NONE" | "WEEKLY" | "BIWEEKLY" | "MONTHLY";
   recurrenceEndDate?: string | null;
   isRecurringTemplate?: boolean;
   recurrenceGroupId?: string | null;
+  updatedAt?: string;
 };
 
 type StaffDto = {
@@ -195,7 +196,6 @@ const EMPTY_CLIENT: ClientInfo = { nom: "", tel: "", email: "", adresse: "" };
 function extractClientBlock(notesRaw: string): { client: ClientInfo; restNotes: string } {
   const raw = String(notesRaw || "");
 
-  // format principal: [[CLIENT]] ... [[/CLIENT]]
   const start = raw.indexOf("[[CLIENT]]");
   const end = raw.indexOf("[[/CLIENT]]");
   if (start !== -1 && end !== -1 && end > start) {
@@ -217,15 +217,12 @@ function extractClientBlock(notesRaw: string): { client: ClientInfo; restNotes: 
     return { client, restNotes: rest || "" };
   }
 
-  // compat ancien format si tu avais: <<<CLIENT>>> ... <<<NOTES>>>
   const s2 = raw.indexOf("<<<CLIENT>>>");
   const m2 = raw.indexOf("<<<NOTES>>>");
   if (s2 !== -1 && m2 !== -1 && m2 > s2) {
     const clientText = raw.slice(s2 + "<<<CLIENT>>>".length, m2).trim();
     const rest = raw.slice(m2 + "<<<NOTES>>>".length).trim();
 
-    // on met tout le clientText dans adresse si on ne peut pas mieux parser
-    // (ça évite de perdre l’info)
     const client: ClientInfo = { ...EMPTY_CLIENT, adresse: clientText };
     return { client, restNotes: rest || "" };
   }
@@ -246,7 +243,6 @@ function buildNotesWithClient(client: ClientInfo, restNotes: string) {
     (restNotes || "").trim(),
   ];
 
-  // on évite d’avoir "adresse=" vide si rien
   return lines.join("\n").trim() + "\n";
 }
 
@@ -321,11 +317,6 @@ function Legend({ title = "Légende des chantiers" }: { title?: string }) {
   );
 }
 
-/**
- * ✅ Modal “grand format”
- * - Desktop: max-w-5xl + hauteur 90vh + scroll interne
- * - Mobile: quasi plein écran
- */
 function Modal({
   open,
   title,
@@ -342,15 +333,13 @@ function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-6" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-       <div
-  className={[
-    "relative w-full bg-white shadow-xl border flex flex-col overflow-hidden",
-    // ✅ Mobile: plein écran
-    "h-[100dvh] rounded-none",
-    // ✅ Desktop: modal classique
-    "md:max-w-5xl md:h-[92vh] md:rounded-2xl",
-  ].join(" ")}
->
+      <div
+        className={[
+          "relative w-full bg-white shadow-xl border flex flex-col overflow-hidden",
+          "h-[100dvh] rounded-none",
+          "md:max-w-5xl md:h-[92vh] md:rounded-2xl",
+        ].join(" ")}
+      >
         <div className="px-6 py-4 border-b flex items-center justify-between">
           <div className="text-lg font-bold">{title}</div>
           <button onClick={onClose} className="h-9 w-9 rounded-lg border hover:bg-slate-50" aria-label="Fermer" type="button">
@@ -364,7 +353,6 @@ function Modal({
   );
 }
 
-/** Pill draggable (id = eventId@cellISO) */
 function DraggablePill({
   draggableId,
   style,
@@ -417,7 +405,6 @@ function DraggablePill({
   );
 }
 
-/** Cell droppable */
 function DroppableDayCell({
   iso,
   dayNumber,
@@ -462,7 +449,6 @@ function DroppableDayCell({
   );
 }
 
-/** ---------- Pile intelligente : Popover / Bottom sheet ---------- */
 type DayPopover = {
   open: boolean;
   iso: string;
@@ -645,30 +631,28 @@ export default function Page() {
   const [formIntervenants, setFormIntervenants] = useState<string[]>([]);
   const [formRecurrenceFrequency, setFormRecurrenceFrequency] = useState<RecurrenceFrequency>("NONE");
   const [formRecurrenceEndDate, setFormRecurrenceEndDate] = useState("");
+
   const inactiveAssigned = useMemo(() => {
-  if (!Array.isArray(formIntervenants) || formIntervenants.length === 0) return [];
-  if (!Array.isArray(staff) || staff.length === 0) return [];
+    if (!Array.isArray(formIntervenants) || formIntervenants.length === 0) return [];
+    if (!Array.isArray(staff) || staff.length === 0) return [];
 
-  const inactiveNames = new Set(
-    staff
-      .filter((m) => m.isActive === false)
-      .map((m) => (m.fullName || `${m.firstName} ${m.lastName}`.trim()).trim())
-      .filter(Boolean)
-  );
+    const inactiveNames = new Set(
+      staff
+        .filter((m) => m.isActive === false)
+        .map((m) => (m.fullName || `${m.firstName} ${m.lastName}`.trim()).trim())
+        .filter(Boolean)
+    );
 
-  return formIntervenants.filter((name) => inactiveNames.has(String(name).trim()));
-}, [formIntervenants, staff]);
+    return formIntervenants.filter((name) => inactiveNames.has(String(name).trim()));
+  }, [formIntervenants, staff]);
 
-  // ✅ Notes intervenant (sans bloc client)
   const [formNotes, setFormNotes] = useState("");
 
-  // ✅ Coordonnées client
   const [clientNom, setClientNom] = useState("");
   const [clientTel, setClientTel] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [clientAdresse, setClientAdresse] = useState("");
 
-  // ✅ Photos
   const [photos, setPhotos] = useState<PhotoDTO[]>([]);
   const [photosLoading, setPhotosLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -678,34 +662,36 @@ export default function Page() {
   }, [isMobile, view]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
-  const jobId = editingId;
-  if (!jobId) {
-    console.warn("Aucun chantier sélectionné (editingId null)");
+
+  async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
+    const jobId = editingId;
+    if (!jobId) {
+      console.warn("Aucun chantier sélectionné (editingId null)");
+      e.target.value = "";
+      return;
+    }
+
+    const list = e.target.files;
+    if (!list || list.length === 0) return;
+
+    const files = Array.from(list);
     e.target.value = "";
-    return;
+
+    setError(null);
+    try {
+      await uploadPhotos({
+        jobId,
+        files,
+        setPhotos: (p: PhotoDTO[]) => setPhotos(p),
+        setPhotosLoading: (v: boolean) => setPhotosLoading(v),
+      });
+    } catch (err: any) {
+      setError(err?.message ?? "Erreur upload photos");
+      setPhotos([]);
+      setPhotosLoading(false);
+    }
   }
 
-  const list = e.target.files;
-  if (!list || list.length === 0) return;
-
-  const files = Array.from(list);
-  e.target.value = "";
-
-  setError(null);
-  try {
-  await uploadPhotos({
-  jobId,
-  files,
-  setPhotos: (p: PhotoDTO[]) => setPhotos(p),
-  setPhotosLoading: (v: boolean) => setPhotosLoading(v),
-});
-  } catch (err: any) {
-    setError(err?.message ?? "Erreur upload photos");
-    setPhotos([]); // sécurité UI : on garde un tableau
-    setPhotosLoading(false);
-  }
-}
   async function refresh() {
     setLoading(true);
     setError(null);
@@ -762,14 +748,13 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormRecurrenceFrequency("NONE");
     setFormRecurrenceEndDate(d);
 
-    // notes & client
     setFormNotes("");
     setClientNom("");
     setClientTel("");
     setClientEmail("");
     setClientAdresse("");
 
-    setPhotos([]); // pas de photos tant qu’on n’a pas d’id
+    setPhotos([]);
     setModalOpen(true);
   }
 
@@ -790,7 +775,6 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormRecurrenceFrequency((ev.recurrenceFrequency as RecurrenceFrequency) ?? "NONE");
     setFormRecurrenceEndDate(ev.recurrenceEndDate ?? ev.endDate);
 
-    // ✅ split notes -> client + restNotes
     const { client, restNotes } = extractClientBlock(ev.notes ?? "");
     setClientNom(client.nom || "");
     setClientTel(client.tel || "");
@@ -799,8 +783,6 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     setFormNotes(restNotes || "");
 
     setModalOpen(true);
-
-    // ✅ load photos
     refreshPhotos(ev.id);
   }
 
@@ -810,23 +792,23 @@ async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     const title = formTitle.trim();
     if (!title) return window.alert("Le titre est obligatoire.");
     if (formEnd < formStart) return window.alert("La date de fin doit être >= date de début.");
+
     if (
-  formType === "Nettoyage de bureau" &&
-  formRecurrenceFrequency !== "NONE" &&
-  !formRecurrenceEndDate
-) {
-  return window.alert("La date de fin de récurrence est obligatoire.");
-}
+      formType === "Nettoyage de bureau" &&
+      formRecurrenceFrequency !== "NONE" &&
+      !formRecurrenceEndDate
+    ) {
+      return window.alert("La date de fin de récurrence est obligatoire.");
+    }
 
-if (
-  formType === "Nettoyage de bureau" &&
-  formRecurrenceFrequency !== "NONE" &&
-  formRecurrenceEndDate < formStart
-) {
-  return window.alert("La date de fin de récurrence doit être >= à la date de début.");
-}
+    if (
+      formType === "Nettoyage de bureau" &&
+      formRecurrenceFrequency !== "NONE" &&
+      formRecurrenceEndDate < formStart
+    ) {
+      return window.alert("La date de fin de récurrence doit être >= à la date de début.");
+    }
 
-    // ✅ rebuild notes with client block
     const notesPacked = buildNotesWithClient(
       { nom: clientNom, tel: clientTel, email: clientEmail, adresse: clientAdresse },
       formNotes
@@ -835,55 +817,75 @@ if (
     setSaving(true);
     try {
       if (!editingId) {
-  const created = await createChantier({
-    type: formType,
-    title,
-    startDate: formStart,
-    endDate: formEnd,
-    status: formStatus,
-    archived: formArchived,
-    intervenants: formIntervenants,
-    notes: notesPacked,
-    recurrenceFrequency:
-      formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
-    recurrenceEndDate:
-      formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
-        ? formRecurrenceEndDate
-        : null,
-  });
+        const created = await createChantier({
+          type: formType,
+          title,
+          startDate: formStart,
+          endDate: formEnd,
+          status: formStatus,
+          archived: formArchived,
+          intervenants: formIntervenants,
+          notes: notesPacked,
+          recurrenceFrequency:
+            formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
+          recurrenceEndDate:
+            formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
+              ? formRecurrenceEndDate
+              : null,
+        });
 
-  // ✅ recharge toute la liste pour récupérer toutes les occurrences générées
-  await refresh();
+        await refresh();
 
-  setEditingId(created.id);
-  await refreshPhotos(created.id);
-  }
-
-  else {
+        setEditingId(created.id);
+        await refreshPhotos(created.id);
+      } else {
         const updated = await updateChantier(editingId, {
-  type: formType,
-  title,
-  startDate: formStart,
-  endDate: formEnd,
-  status: formStatus,
-  archived: formArchived,
-  intervenants: formIntervenants,
-  notes: notesPacked,
-  recurrenceFrequency:
-    formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
-  recurrenceEndDate:
-    formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
-      ? formRecurrenceEndDate
-      : null,
-});
+          type: formType,
+          title,
+          startDate: formStart,
+          endDate: formEnd,
+          status: formStatus,
+          archived: formArchived,
+          intervenants: formIntervenants,
+          notes: notesPacked,
+          recurrenceFrequency:
+            formType === "Nettoyage de bureau" ? formRecurrenceFrequency : "NONE",
+          recurrenceEndDate:
+            formType === "Nettoyage de bureau" && formRecurrenceFrequency !== "NONE"
+              ? formRecurrenceEndDate
+              : null,
+        });
 
-        await refresh(); // ✅ évite les incohérences type/récurrence
-await refreshPhotos(updated.id);
+        await refresh();
+        await refreshPhotos(updated.id);
       }
 
       setModalOpen(false);
     } catch (e: any) {
       setError(e?.message ?? "Erreur inconnue");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function finishAndOpenPdf() {
+    if (!editingId) return;
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      await updateChantier(editingId, {
+        status: "TERMINE",
+      });
+
+      await refresh();
+
+      window.open(`/api/chantiers/${editingId}/pdf`, "_blank", "noopener,noreferrer");
+
+      setModalOpen(false);
+    } catch (e: any) {
+      setError(e?.message ?? "Erreur Terminer + PDF");
     } finally {
       setSaving(false);
     }
@@ -931,7 +933,7 @@ await refreshPhotos(updated.id);
   }, [cursor, view]);
 
   async function onDragEnd(evt: DragEndEvent) {
-    const active = String(evt.active.id); // eventId@YYYY-MM-DD
+    const active = String(evt.active.id);
     const overId = evt.over?.id ? String(evt.over.id) : null;
     if (!overId || !overId.startsWith("cell:")) return;
 
@@ -992,27 +994,25 @@ await refreshPhotos(updated.id);
   }
 
   return (
-   <main className="min-h-screen bg-slate-50">
-  {/* Header desktop uniquement (évite de bouffer l’écran sur mobile) */}
-  <div className="bg-white border-b hidden md:block">
-    <div className="mx-auto max-w-6xl px-6 py-5 flex items-center justify-between gap-4">
-      <div className="min-w-0">
-        <div className="text-3xl font-bold truncate">Phoenix Ops – Planning</div>
-        <div className="text-slate-600 mt-1 truncate">Gestion des chantiers : Diogène, post-mortem, insalubre, 3D…</div>
+    <main className="min-h-screen bg-slate-50">
+      <div className="bg-white border-b hidden md:block">
+        <div className="mx-auto max-w-6xl px-6 py-5 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-3xl font-bold truncate">Phoenix Ops – Planning</div>
+            <div className="text-slate-600 mt-1 truncate">Gestion des chantiers : Diogène, post-mortem, insalubre, 3D…</div>
+          </div>
+
+          <button
+            onClick={() => openNewChantier()}
+            className={`shrink-0 rounded-xl px-5 py-3 font-semibold hover:opacity-95 ${FOREST_BTN}`}
+            disabled={saving}
+          >
+            + Nouveau
+          </button>
+        </div>
       </div>
 
-      <button
-        onClick={() => openNewChantier()}
-        className={`shrink-0 rounded-xl px-5 py-3 font-semibold hover:opacity-95 ${FOREST_BTN}`}
-        disabled={saving}
-      >
-        + Nouveau
-      </button>
-    </div>
-  </div>
-
-  {/* Contenu : padding compact sur mobile */}
-  <div className="mx-auto max-w-6xl px-3 py-4 md:px-6 md:py-8 space-y-4 md:space-y-6">
+      <div className="mx-auto max-w-6xl px-3 py-4 md:px-6 md:py-8 space-y-4 md:space-y-6">
         {error ? (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
             <div className="font-semibold">Erreur</div>
@@ -1140,7 +1140,6 @@ await refreshPhotos(updated.id);
 
       <Modal open={modalOpen} title={editingId ? "Modifier chantier" : "Nouveau chantier"} onClose={() => setModalOpen(false)}>
         <div className="space-y-6">
-          {/* Ligne 1 : Dates / Type / Statut */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="rounded-2xl border bg-white p-4">
               <div className="font-semibold mb-3">Dates</div>
@@ -1184,7 +1183,6 @@ await refreshPhotos(updated.id);
             </div>
           </div>
 
-          {/* Titre */}
           <div className="rounded-2xl border bg-white p-4">
             <label className="block text-sm font-semibold mb-1">Titre</label>
             <input
@@ -1194,45 +1192,45 @@ await refreshPhotos(updated.id);
               className="w-full rounded-xl border px-3 py-2"
             />
           </div>
+
           {formType === "Nettoyage de bureau" ? (
-  <div className="rounded-2xl border bg-white p-4">
-    <div className="font-semibold mb-3">Récurrence bureau</div>
+            <div className="rounded-2xl border bg-white p-4">
+              <div className="font-semibold mb-3">Récurrence bureau</div>
 
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-      <div>
-        <label className="block text-sm font-semibold mb-1">Fréquence</label>
-        <select
-          value={formRecurrenceFrequency}
-          onChange={(e) => setFormRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
-          className="w-full rounded-xl border px-3 py-2"
-        >
-          <option value="NONE">Aucune (ponctuel)</option>
-          <option value="WEEKLY">Chaque semaine</option>
-          <option value="BIWEEKLY">Toutes les 2 semaines</option>
-          <option value="MONTHLY">Chaque mois</option>
-        </select>
-      </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-semibold mb-1">Fréquence</label>
+                  <select
+                    value={formRecurrenceFrequency}
+                    onChange={(e) => setFormRecurrenceFrequency(e.target.value as RecurrenceFrequency)}
+                    className="w-full rounded-xl border px-3 py-2"
+                  >
+                    <option value="NONE">Aucune (ponctuel)</option>
+                    <option value="WEEKLY">Chaque semaine</option>
+                    <option value="BIWEEKLY">Toutes les 2 semaines</option>
+                    <option value="MONTHLY">Chaque mois</option>
+                  </select>
+                </div>
 
-      {formRecurrenceFrequency !== "NONE" ? (
-        <div>
-          <label className="block text-sm font-semibold mb-1">Récurrence jusqu’au</label>
-          <input
-            type="date"
-            value={formRecurrenceEndDate}
-            onChange={(e) => setFormRecurrenceEndDate(e.target.value)}
-            className="w-full rounded-xl border px-3 py-2"
-          />
-        </div>
-      ) : null}
-    </div>
+                {formRecurrenceFrequency !== "NONE" ? (
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">Récurrence jusqu’au</label>
+                    <input
+                      type="date"
+                      value={formRecurrenceEndDate}
+                      onChange={(e) => setFormRecurrenceEndDate(e.target.value)}
+                      className="w-full rounded-xl border px-3 py-2"
+                    />
+                  </div>
+                ) : null}
+              </div>
 
-    <div className="text-xs text-slate-500 mt-2">
-      Pour un contrat régulier, choisis une fréquence et une date de fin. Pour une intervention ponctuelle, laisse “Aucune”.
-    </div>
-  </div>
-) : null}
+              <div className="text-xs text-slate-500 mt-2">
+                Pour un contrat régulier, choisis une fréquence et une date de fin. Pour une intervention ponctuelle, laisse “Aucune”.
+              </div>
+            </div>
+          ) : null}
 
-          {/* ✅ Coordonnées client */}
           <div className="rounded-2xl border bg-white p-4">
             <div className="font-semibold mb-3">Coordonnées client</div>
 
@@ -1259,7 +1257,6 @@ await refreshPhotos(updated.id);
             </div>
           </div>
 
-          {/* ✅ Intervenants DB */}
           <div className="rounded-2xl border bg-white p-4">
             <div className="flex items-center justify-between gap-2 mb-3">
               <div className="font-semibold">Intervenants</div>
@@ -1267,18 +1264,19 @@ await refreshPhotos(updated.id);
                 {staffLoading ? "Chargement…" : "Rafraîchir"}
               </button>
             </div>
+
             {inactiveAssigned.length > 0 ? (
-  <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-    <div className="font-semibold">Attention</div>
-    <div className="mt-1">
-      Intervenant(s) inactif(s) encore assigné(s) à ce chantier :
-      <span className="font-semibold"> {inactiveAssigned.join(", ")}</span>
-    </div>
-    <div className="mt-1 text-amber-800">
-      (Historique conservé. Retire-les si tu ne veux plus qu’ils apparaissent sur ce chantier.)
-    </div>
-  </div>
-) : null}
+              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <div className="font-semibold">Attention</div>
+                <div className="mt-1">
+                  Intervenant(s) inactif(s) encore assigné(s) à ce chantier :
+                  <span className="font-semibold"> {inactiveAssigned.join(", ")}</span>
+                </div>
+                <div className="mt-1 text-amber-800">
+                  (Historique conservé. Retire-les si tu ne veux plus qu’ils apparaissent sur ce chantier.)
+                </div>
+              </div>
+            ) : null}
 
             {staff.length === 0 ? (
               <div className="rounded-xl border bg-slate-50 p-3 text-sm text-slate-700">
@@ -1287,30 +1285,29 @@ await refreshPhotos(updated.id);
             ) : (
               <div className="flex flex-wrap gap-2">
                 {staff
-  .filter((m) => m.isActive !== false)
-  .map((m) => {
-                  const label = m.fullName || `${m.firstName} ${m.lastName}`.trim();
-                  const checked = formIntervenants.includes(label);
+                  .filter((m) => m.isActive !== false)
+                  .map((m) => {
+                    const label = m.fullName || `${m.firstName} ${m.lastName}`.trim();
+                    const checked = formIntervenants.includes(label);
 
-                  return (
-                    <label key={m.id} className="flex items-center gap-2 rounded-xl border px-3 py-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          if (e.target.checked) setFormIntervenants((prev) => Array.from(new Set([...prev, label])));
-                          else setFormIntervenants((prev) => prev.filter((x) => x !== label));
-                        }}
-                      />
-                      <span className="text-sm font-semibold">{label}</span>
-                    </label>
-                  );
-                })}
+                    return (
+                      <label key={m.id} className="flex items-center gap-2 rounded-xl border px-3 py-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            if (e.target.checked) setFormIntervenants((prev) => Array.from(new Set([...prev, label])));
+                            else setFormIntervenants((prev) => prev.filter((x) => x !== label));
+                          }}
+                        />
+                        <span className="text-sm font-semibold">{label}</span>
+                      </label>
+                    );
+                  })}
               </div>
             )}
           </div>
 
-          {/* Notes intervenant */}
           <div className="rounded-2xl border bg-white p-4">
             <label className="block text-sm font-semibold mb-1">Notes intervenant</label>
             <textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} className="w-full rounded-xl border px-3 py-2 min-h-[120px]" />
@@ -1319,7 +1316,6 @@ await refreshPhotos(updated.id);
             </div>
           </div>
 
-          {/* ✅ Photos chantier */}
           <div className="rounded-2xl border bg-white p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="font-semibold">Photos du chantier</div>
@@ -1360,42 +1356,42 @@ await refreshPhotos(updated.id);
               </div>
             </div>
 
-             {!editingId ? (
-  <div className="mt-2 text-sm text-slate-600">
-    Enregistre le chantier une première fois pour pouvoir associer des photos.
-  </div>
-) : photosLoading ? (
-  <div className="mt-3 text-sm text-slate-600">Chargement photos…</div>
-) : (() => {
-  const safePhotos: PhotoDTO[] = Array.isArray(photos) ? photos : [];
+            {!editingId ? (
+              <div className="mt-2 text-sm text-slate-600">
+                Enregistre le chantier une première fois pour pouvoir associer des photos.
+              </div>
+            ) : photosLoading ? (
+              <div className="mt-3 text-sm text-slate-600">Chargement photos…</div>
+            ) : (() => {
+              const safePhotos: PhotoDTO[] = Array.isArray(photos) ? photos : [];
 
-  if (safePhotos.length === 0) {
-    return <div className="mt-3 text-sm text-slate-600">Aucune photo.</div>;
-  }
+              if (safePhotos.length === 0) {
+                return <div className="mt-3 text-sm text-slate-600">Aucune photo.</div>;
+              }
 
-  return (
-    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-      {safePhotos
-        .filter(
-          (p) =>
-            p &&
-            typeof p.id === "string" &&
-            typeof p.fileUrl === "string" &&
-            p.fileUrl.length > 0
-        )
-        .map((p) => (
-          <a key={p.id} href={p.fileUrl} target="_blank" rel="noreferrer">
-            <img
-              src={p.fileUrl}
-              alt={p.fileLabel || "Photo"}
-              loading="lazy"
-              className="w-full h-28 object-cover rounded-lg border"
-            />
-          </a>
-        ))}
-    </div>
-  );
-})()}
+              return (
+                <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {safePhotos
+                    .filter(
+                      (p) =>
+                        p &&
+                        typeof p.id === "string" &&
+                        typeof p.fileUrl === "string" &&
+                        p.fileUrl.length > 0
+                    )
+                    .map((p) => (
+                      <a key={p.id} href={p.fileUrl} target="_blank" rel="noreferrer">
+                        <img
+                          src={p.fileUrl}
+                          alt={p.fileLabel || "Photo"}
+                          loading="lazy"
+                          className="w-full h-28 object-cover rounded-lg border"
+                        />
+                      </a>
+                    ))}
+                </div>
+              );
+            })()}
 
             {editingId ? (
               <div className="mt-4 flex items-center justify-end">
@@ -1406,7 +1402,6 @@ await refreshPhotos(updated.id);
             ) : null}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center justify-between pt-2">
             <div>
               {editingId ? (
@@ -1417,10 +1412,30 @@ await refreshPhotos(updated.id);
             </div>
 
             <div className="flex items-center gap-2">
-              <button onClick={() => setModalOpen(false)} className="rounded-xl border px-4 py-2 font-semibold hover:bg-slate-50" disabled={saving}>
+              <button
+                onClick={() => setModalOpen(false)}
+                className="rounded-xl border px-4 py-2 font-semibold hover:bg-slate-50"
+                disabled={saving}
+              >
                 Annuler
               </button>
-              <button onClick={saveChantier} className={`rounded-xl px-4 py-2 font-semibold hover:opacity-95 ${FOREST_BTN}`} disabled={saving}>
+
+              {editingId ? (
+                <button
+                  onClick={finishAndOpenPdf}
+                  className="rounded-xl border px-4 py-2 font-semibold hover:bg-slate-50"
+                  disabled={saving}
+                  type="button"
+                >
+                  {saving ? "Traitement…" : "Terminer + PDF"}
+                </button>
+              ) : null}
+
+              <button
+                onClick={saveChantier}
+                className={`rounded-xl px-4 py-2 font-semibold hover:opacity-95 ${FOREST_BTN}`}
+                disabled={saving}
+              >
                 {saving ? "Enregistrement…" : "Enregistrer"}
               </button>
             </div>
@@ -1456,57 +1471,55 @@ function MonthGrid({
   for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
 
   return (
-  <div className="space-y-3">
-    <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="min-w-[760px] md:min-w-0">
-        {/* Jours semaine */}
-        <div className="grid grid-cols-7 gap-3 px-1">
-          {Array.from({ length: 7 }).map((_, i) => (
-            <div key={i} className="text-center text-slate-600 font-semibold">
-              {weekdayShortFR(i)}
-            </div>
-          ))}
-        </div>
+    <div className="space-y-3">
+      <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="min-w-[760px] md:min-w-0">
+          <div className="grid grid-cols-7 gap-3 px-1">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="text-center text-slate-600 font-semibold">
+                {weekdayShortFR(i)}
+              </div>
+            ))}
+          </div>
 
-        {/* Grille */}
-        <div className="mt-3 grid grid-cols-7 gap-3">
-          {days.map((d) => {
-            const iso = toISODate(d);
-            const inMonth = d.getMonth() === cursor.getMonth();
-            const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
+          <div className="mt-3 grid grid-cols-7 gap-3">
+            {days.map((d) => {
+              const iso = toISODate(d);
+              const inMonth = d.getMonth() === cursor.getMonth();
+              const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
 
-            const visible = dayEvents.slice(0, 3);
-            const hiddenCount = Math.max(0, dayEvents.length - visible.length);
+              const visible = dayEvents.slice(0, 3);
+              const hiddenCount = Math.max(0, dayEvents.length - visible.length);
 
-            return (
-              <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={!inMonth} onClick={() => onCellClick(iso)}>
-                {visible.map((e) => (
-                  <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
-                ))}
+              return (
+                <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={!inMonth} onClick={() => onCellClick(iso)}>
+                  {visible.map((e) => (
+                    <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
+                  ))}
 
-                {hiddenCount > 0 && (
-                  <button
-                    type="button"
-                    className="w-full rounded-lg border bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 min-h-[44px]"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      const cell = ev.currentTarget.closest("[data-iso]") as HTMLElement | null;
-                      const rect = cell?.getBoundingClientRect();
-                      if (rect) onMore(iso, rect);
-                    }}
-                    title="Afficher les autres chantiers"
-                  >
-                    +{hiddenCount} autres
-                  </button>
-                )}
-              </DroppableDayCell>
-            );
-          })}
+                  {hiddenCount > 0 && (
+                    <button
+                      type="button"
+                      className="w-full rounded-lg border bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 min-h-[44px]"
+                      onClick={(ev) => {
+                        ev.stopPropagation();
+                        const cell = ev.currentTarget.closest("[data-iso]") as HTMLElement | null;
+                        const rect = cell?.getBoundingClientRect();
+                        if (rect) onMore(iso, rect);
+                      }}
+                      title="Afficher les autres chantiers"
+                    >
+                      +{hiddenCount} autres
+                    </button>
+                  )}
+                </DroppableDayCell>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
 }
 
 function WeekGrid({
@@ -1525,9 +1538,8 @@ function WeekGrid({
   const w0 = startOfWeekMonday(cursor);
   const days = Array.from({ length: 7 }).map((_, i) => addDays(w0, i));
 
-    return (
+  return (
     <div className="space-y-3">
-      {/* ✅ Mobile: scroll horizontal propre + largeur mini lisible */}
       <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="min-w-[760px] md:min-w-0">
           <div className="grid grid-cols-7 gap-3 px-1">
