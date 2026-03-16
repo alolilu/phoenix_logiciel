@@ -28,12 +28,20 @@ enum JobType {
   NEBULISATION
   SCENE_DE_CRIME
   DEVIS
+  NETTOYAGE_BUREAU
 }
 
 enum JobStatus {
   EN_ATTENTE
   EN_COURS
   TERMINE
+}
+
+enum RecurrenceFrequency {
+  NONE
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
 }
 
 enum AttachmentKind {
@@ -107,6 +115,14 @@ model JobItem {
   startAt DateTime
   endAt   DateTime
   
+  recurrenceFrequency RecurrenceFrequency @default(NONE)
+  recurrenceInterval  Int                 @default(0)
+  recurrenceDayOfWeek Int?
+  recurrenceStartDate DateTime?
+  recurrenceEndDate   DateTime?
+  recurrenceGroupId   String?
+  isRecurringTemplate Boolean             @default(false)
+
   clientName    String? 
   clientPhone   String?
   clientEmail   String?
