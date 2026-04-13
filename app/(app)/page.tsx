@@ -59,6 +59,8 @@ const CHANTIER_COLORS: Record<string, string> = {
   nebulisation: "#0EA5E9",
   devis: "#6B7280",
   "nettoyage de bureau": "#16A34A",
+  "sinistre incendie": "#B91C1C",
+  "degats des eaux": "#0EA5E9",
 };
 
 function getChantierColor(typeLabel: string) {
@@ -76,6 +78,8 @@ const CHANTIER_TYPES = [
   "Devis",
   "Débarras",
   "Nettoyage de bureau",
+  "Sinistre incendie",
+  "Dégâts des eaux",
 ] as const;
 
 type ChantierType = (typeof CHANTIER_TYPES)[number];
