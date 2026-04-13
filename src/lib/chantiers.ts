@@ -43,6 +43,8 @@ export function mapTypeToEnum(typeLabel: string): JobType {
   if (t === "scène de crime" || t === "scene de crime") return JobType.SCENE_DE_CRIME;
   if (t === "devis") return JobType.DEVIS;
   if (t === "nettoyage bureau" || t === "nettoyage de bureau")
+  if (t === "sinistre incendie") return JobType.SINISTRE_INCENDIE;
+  if (t === "dégâts des eaux" || t === "degats des eaux") return JobType.DEGATS_DES_EAUX;
   return JobType.NETTOYAGE_BUREAU;
   return JobType.DIOGENE;
 }
@@ -61,6 +63,8 @@ export function mapEnumToLabel(type: JobType): string {
     SCENE_DE_CRIME: "Scène de crime",
     DEVIS: "Devis",
     NETTOYAGE_BUREAU: "Nettoyage de bureau",
+    SINISTRE_INCENDIE: "Sinistre incendie",
+    DEGATS_DES_EAUX: "Dégâts des eaux",
   };
   return m[type] ?? "Diogène";
 }

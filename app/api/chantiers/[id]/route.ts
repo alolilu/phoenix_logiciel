@@ -58,6 +58,8 @@ function mapUITypeToEnum(typeLabel: string) {
   if (k === "scene de crime") return "SCENE_DE_CRIME";
   if (k === "devis") return "DEVIS";
   if (k === "nettoyage de bureau" || k === "nettoyage bureau") return "NETTOYAGE_BUREAU";
+  if (k === "sinistre incendie") return "SINISTRE_INCENDIE";
+  if (k === "degats des eaux") return "DEGATS_DES_EAUX";
 
   return "DEVIS";
 }

@@ -29,6 +29,8 @@ enum JobType {
   SCENE_DE_CRIME
   DEVIS
   NETTOYAGE_BUREAU
+  SINISTRE_INCENDIE
+  DEGATS_DES_EAUX
 }
 
 enum JobStatus {
