@@ -60,7 +60,7 @@ const CHANTIER_COLORS: Record<string, string> = {
   devis: "#6B7280",
   "nettoyage de bureau": "#16A34A",
   "sinistre incendie": "#B91C1C",
-  "degats des eaux": "#0EA5E9",
+  "degats des eaux": "#F97316",
 };
 
 function getChantierColor(typeLabel: string) {
