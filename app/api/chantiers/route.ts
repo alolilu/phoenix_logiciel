@@ -139,6 +139,8 @@ function mapEnumTypeToUILabel(typeEnum: string) {
   if (typeEnum === "SCENE_DE_CRIME") return "Scène de crime";
   if (typeEnum === "DEVIS") return "Devis";
   if (typeEnum === "NETTOYAGE_BUREAU") return "Nettoyage de bureau";
+  if (typeEnum === "SINISTRE_INCENDIE") return "Sinistre incendie";
+  if (typeEnum === "DEGATS_DES_EAUX") return "Dégâts des eaux";
   return String(typeEnum);
 }
 
