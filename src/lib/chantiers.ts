@@ -32,21 +32,25 @@ export function toISODate(d: Date): string {
 export function mapTypeToEnum(typeLabel: string): JobType {
   const t = (typeLabel || "").trim().toLowerCase();
 
-  if (t === "diogène" || t === "diogene") return JobType.DIOGENE;
-  if (t === "post-mortem" || t === "post mortem") return JobType.POST_MORTEM;
-  if (t === "noé" || t === "noe") return JobType.NOE;
-  if (t === "dératisation" || t === "deratisation") return JobType.DERATISATION;
-  if (t === "désinsectisation" || t === "desinsectisation") return JobType.DESINSECTISATION;
-  if (t === "débarras" || t === "debarras") return JobType.DEBARRAS;
-  if (t === "ozone") return JobType.OZONE;
-  if (t === "nébulisation" || t === "nebulisation") return JobType.NEBULISATION;
-  if (t === "scène de crime" || t === "scene de crime") return JobType.SCENE_DE_CRIME;
-  if (t === "devis") return JobType.DEVIS;
-  if (t === "nettoyage de bureau") return JobType.NETTOYAGE_BUREAU;
-  if (t === "sinistre incendie") return JobType.SINISTRE_INCENDIE;
-  if (t === "dégâts des eaux" || t === "degats des eaux") return JobType.DEGATS_DES_EAUX;
-  return JobType.NETTOYAGE_BUREAU;
-  return JobType.DIOGENE;
+  if (t === "diogene") return JobType.DIOGENE;
+if (t === "post-mortem") return JobType.POST_MORTEM;
+if (t === "noe") return JobType.NOE;
+if (t === "deratisation") return JobType.DERATISATION;
+if (t === "desinsectisation") return JobType.DESINSECTISATION;
+if (t === "debarras") return JobType.DEBARRAS;
+if (t === "ozone") return JobType.OZONE;
+if (t === "nebulisation") return JobType.NEBULISATION;
+if (t === "scene de crime") return JobType.SCENE_DE_CRIME;
+if (t === "devis") return JobType.DEVIS;
+
+if (t === "nettoyage de bureau") return JobType.NETTOYAGE_BUREAU;
+
+if (t === "sinistre incendie") return JobType.SINISTRE_INCENDIE;
+
+if (t === "degats des eaux" || t === "dégâts des eaux")
+  return JobType.DEGATS_DES_EAUX;
+
+return JobType.DIOGENE;
 }
 
 // enum -> UI label
