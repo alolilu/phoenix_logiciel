@@ -5,6 +5,10 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   // ✅ Laisser passer tout ce qui est PWA / statique
+  if (pathname === "/login") {
+    return NextResponse.redirect(new URL("/connexion", req.url));
+  }
+
   if (
     pathname === "/manifest.webmanifest" ||
     pathname === "/sw.js" ||
