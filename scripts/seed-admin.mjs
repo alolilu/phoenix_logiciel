@@ -14,9 +14,9 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 // 🔥 IDENTIFIANTS QUE TU VEUX
-const USERNAME = "david.mazzer";
+const USERNAME = "Digitallexs";
 const EMAIL = "mazzerdavid@gmail.com";
-const PASSWORD = "Mazzerjade26.";
+const PASSWORD = "1234";
 
 async function main() {
   const passwordHash = await bcrypt.hash(PASSWORD, 12);
