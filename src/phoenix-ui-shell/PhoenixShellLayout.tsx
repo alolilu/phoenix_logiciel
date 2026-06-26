@@ -41,7 +41,7 @@ export function PhoenixShellLayout(props: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-phoenixOffWhite text-phoenixInk">
+    <div className="bg-phoenixOffWhite text-phoenixInk min-h-screen overflow-x-hidden">
       {/* HEADER */}
       <header className="sticky top-0 z-50 border-b border-black/10 bg-phoenixGreen text-phoenixOffWhite">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
@@ -142,7 +142,7 @@ export function PhoenixShellLayout(props: { children: React.ReactNode }) {
       </aside>
 
       {/* CONTENU */}
-      <main className="mx-auto max-w-6xl p-4">{props.children}</main>
+      <main className="mx-auto max-w-6xl p-4 overflow-hidden">{props.children}</main>
     </div>
   );
 }
