@@ -1,37 +1,10 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import {
-  DndContext,
-  DragEndEvent,
-  PointerSensor,
-  rectIntersection,
-  useDraggable,
-  useDroppable,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { uploadPhotos } from "@/lib/uploadPhotos";
 import type { PhotoDTO } from "@/lib/uploadPhotos";
 
-/** ---------- Mobile helper ---------- */
-function useIsMobile(breakpointPx = 768) {
-  const [isMobile, setIsMobile] = useState(false);
 
-  useEffect(() => {
-    const mq = window.matchMedia(`(max-width: ${breakpointPx - 1}px)`);
-    const onChange = () => setIsMobile(mq.matches);
-    onChange();
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, [breakpointPx]);
-
-  return isMobile;
-}
-
-/**
- * Normalisation robuste :
- */
 function normalizeType(type: string) {
   return (type || "")
     .trim()
@@ -89,6 +62,8 @@ type ChantierEvent = {
   title: string;
   startDate: string;
   endDate: string;
+  startTime?: string;
+  endTime?: string;
   status: ChantierStatus;
   archived: boolean;
   intervenants: string[];
@@ -119,6 +94,14 @@ const STATUS_LABEL: Record<ChantierStatus, string> = {
   EN_COURS: "En cours",
   TERMINE: "Terminé",
 };
+
+function statusLabelFR(s: ChantierStatus) {
+  return s === "EN_ATTENTE" ? "En attente" : s === "EN_COURS" ? "En cours" : "Terminé";
+}
+
+function statusDotColor(s: ChantierStatus) {
+  return s === "EN_ATTENTE" ? "#64748b" : s === "EN_COURS" ? "#f59e0b" : "#22c55e";
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -171,19 +154,6 @@ function toISODateUTC(d: Date) {
 function parseISODateUTC(iso: string) {
   return new Date(`${iso}T00:00:00.000Z`);
 }
-function addDaysISO(iso: string, days: number) {
-  const dt = parseISODateUTC(iso);
-  dt.setUTCDate(dt.getUTCDate() + days);
-  return toISODateUTC(dt);
-}
-function subDaysISO(iso: string, days: number) {
-  return addDaysISO(iso, -days);
-}
-function diffDays(startISO: string, endISO: string) {
-  const s = parseISODateUTC(startISO).getTime();
-  const e = parseISODateUTC(endISO).getTime();
-  return Math.floor((e - s) / 86400000);
-}
 function isTodayISO(iso: string) {
   return iso === toISODate(startOfDay(new Date()));
 }
@@ -199,6 +169,26 @@ function dayLabelFR(iso: string) {
   const days = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
   const months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
   return `${days[dt.getDay()]} ${d} ${months[m - 1]}`;
+}
+
+function generateHours() {
+  return Array.from({ length: 14 }, (_, i) => String(i + 7).padStart(2, "0"));
+}
+
+function generateMinuteSteps(stepMinutes = 15) {
+  const steps: string[] = [];
+  for (let m = 0; m < 60; m += stepMinutes) {
+    steps.push(String(m).padStart(2, "0"));
+  }
+  return steps;
+}
+
+const HOURS_LIST = generateHours();
+const MINUTES_LIST_15 = generateMinuteSteps(15);
+
+function splitTime(time: string): [string, string] {
+  const [h, m] = (time || "09:00").split(":");
+  return [h ?? "09", m ?? "00"];
 }
 
 type ClientInfo = { nom: string; tel: string; email: string; adresse: string };
@@ -312,7 +302,7 @@ function Legend({ title = "Légende des chantiers", collapsible = false }: { tit
   const [open, setOpen] = useState(!collapsible);
 
   return (
-    <div className="rounded-md border bg-white p-4 md:p-6 shadow-sm">
+    <div className="rounded-xl border bg-white p-4 md:p-6 shadow-sm">
       <button
         type="button"
         className="w-full flex items-center justify-between text-left"
@@ -326,13 +316,13 @@ function Legend({ title = "Légende des chantiers", collapsible = false }: { tit
       </button>
 
       {open && (
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 md:block md:space-y-3">
+        <div className="mt-3 md:mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
           {CHANTIER_TYPES.map((label) => {
             const color = getChantierColor(label);
             return (
-              <div key={label} className="flex items-center gap-2 md:gap-3">
-                <span className="h-2.5 w-2.5 md:h-3 md:w-3 rounded-full shrink-0" style={{ backgroundColor: color }} aria-hidden="true" />
-                <span className="text-sm md:text-base">{label}</span>
+              <div key={label} className="flex items-center gap-2">
+                <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-xs md:text-sm">{label}</span>
               </div>
             );
           })}
@@ -383,246 +373,6 @@ function Modal({
   );
 }
 
-function DraggablePill({
-  draggableId,
-  style,
-  children,
-  onClick,
-}: {
-  draggableId: string;
-  style?: CSSProperties;
-  children: React.ReactNode;
-  onClick: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: draggableId,
-  });
-
-  const dndStyle: CSSProperties | undefined = transform
-    ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
-    : undefined;
-
-  return (
-    <div ref={setNodeRef} style={dndStyle} className={isDragging ? "opacity-80" : ""}>
-      <div
-        style={style}
-        className={[
-          "w-full",
-          "rounded-lg px-2 py-2 text-xs font-semibold",
-          "cursor-grab active:cursor-grabbing select-none text-white",
-          "transition duration-150 ease-out",
-          "shadow-sm hover:shadow-md",
-          isDragging ? "shadow-lg ring-2 ring-black/15 scale-[1.01]" : "",
-        ].join(" ")}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick();
-        }}
-        {...listeners}
-        {...attributes}
-      >
-        <div
-          style={{
-            lineHeight: "1.15rem",
-            whiteSpace: "normal",
-            wordBreak: "break-word",
-          }}
-        >
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DroppableDayCell({
-  iso,
-  dayNumber,
-  faded,
-  children,
-  onClick,
-}: {
-  iso: string;
-  dayNumber: number;
-  faded: boolean;
-  children: React.ReactNode;
-  onClick: () => void;
-}) {
-  const dropId = `cell:${iso}`;
-  const { setNodeRef, isOver } = useDroppable({ id: dropId });
-
-  const weekend = isWeekendISO(iso);
-  const today = isTodayISO(iso);
-
-  return (
-    <div
-      ref={setNodeRef}
-      onClick={onClick}
-      data-iso={iso}
-      className={[
-        "rounded-xl border p-2 cursor-pointer",
-        "min-h-[96px] md:min-h-[120px]",
-        "hover:bg-slate-50",
-        faded ? "opacity-50" : "",
-        isOver ? "ring-2 ring-slate-400" : "",
-        weekend ? "bg-slate-100" : "bg-slate-50/70",
-        today ? "border-[#183536] ring-1 ring-[#183536]/20" : "",
-      ].join(" ")}
-      title="Cliquer pour ajouter / déposer pour déplacer"
-    >
-      <div className="flex justify-end">
-        <div className="text-xs text-slate-500">{dayNumber}</div>
-      </div>
-
-      <div className="mt-2 space-y-2">{children}</div>
-    </div>
-  );
-}
-
-type DayPopover = {
-  open: boolean;
-  iso: string;
-  top: number;
-  left: number;
-  width: number;
-};
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function statusLabelFR(s: ChantierStatus) {
-  return s === "EN_ATTENTE" ? "En attente" : s === "EN_COURS" ? "En cours" : "Terminé";
-}
-function statusDotColor(s: ChantierStatus) {
-  return s === "EN_ATTENTE" ? "#64748b" : s === "EN_COURS" ? "#f59e0b" : "#22c55e";
-}
-
-function DayEventsPopover({
-  pop,
-  events,
-  onClose,
-  onOpenEvent,
-  onPdf,
-  isMobile,
-}: {
-  pop: DayPopover;
-  events: ChantierEvent[];
-  onClose: () => void;
-  onOpenEvent: (id: string) => void;
-  onPdf: (id: string) => void;
-  isMobile: boolean;
-}) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  if (!pop.open) return null;
-
-  const List = (
-    <div className={isMobile ? "max-h-[65vh] overflow-auto p-3 space-y-2" : "max-h-[360px] overflow-auto p-3 space-y-2"}>
-      {events.length === 0 ? (
-        <div className="text-sm text-slate-600">Aucun chantier.</div>
-      ) : (
-        events.map((e) => {
-          const dot = statusDotColor(e.status);
-          const badgeColor = getChantierColor(String(e.type));
-          return (
-            <div
-              key={e.id}
-              className="rounded-xl border p-3 hover:bg-slate-50 cursor-pointer"
-              onClick={(ev) => {
-                ev.stopPropagation();
-                onOpenEvent(e.id);
-                onClose();
-              }}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: badgeColor }} />
-                    <div className="font-semibold text-slate-900 truncate">{e.title}</div>
-                  </div>
-
-                  <div className="mt-1 inline-flex items-center gap-2 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-800 whitespace-nowrap">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: dot }} aria-hidden="true" />
-                    <span>{statusLabelFR(e.status)}</span>
-                    <span className="text-slate-500 font-semibold">•</span>
-                    <span className="text-slate-600 font-semibold">{String(e.type)}</span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="shrink-0 rounded-md px-2 py-1 text-[10px] font-bold bg-[#183536] text-white hover:opacity-90"
-                  title="Ouvrir le PDF"
-                  onPointerDown={(ev) => ev.stopPropagation()}
-                  onClick={(ev) => {
-                    ev.stopPropagation();
-                    onPdf(e.id);
-                  }}
-                >
-                  PDF
-                </button>
-              </div>
-            </div>
-          );
-        })
-      )}
-    </div>
-  );
-
-  return (
-    <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-
-      {isMobile ? (
-        <div className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-xl rounded-t-2xl border bg-white shadow-2xl overflow-hidden">
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <div className="font-bold text-slate-900">Chantiers du {pop.iso}</div>
-            <button onClick={onClose} className="h-9 w-9 rounded-lg border hover:bg-slate-50" aria-label="Fermer" type="button">
-              ✕
-            </button>
-          </div>
-
-          {List}
-
-          <div className="px-4 py-3 border-t bg-white">
-            <button
-              type="button"
-              className="w-full rounded-lg bg-[#183536] px-3 py-3 text-sm font-semibold text-white hover:opacity-95"
-              onClick={onClose}
-            >
-              Fermer
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-2xl border bg-white shadow-xl overflow-hidden" style={{ width: pop.width }}>
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <div className="font-bold text-slate-900">Chantiers du {pop.iso}</div>
-            <button onClick={onClose} className="h-9 w-9 rounded-lg border hover:bg-slate-50" aria-label="Fermer" type="button">
-              ✕
-            </button>
-          </div>
-
-          {List}
-
-          <div className="px-4 py-3 border-t bg-white">
-            <button type="button" className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-slate-50" onClick={onClose}>
-              Fermer
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MobileCompactDayCell({
   iso,
   dayNumber,
@@ -652,7 +402,7 @@ function MobileCompactDayCell({
       type="button"
       onClick={onClick}
       className={[
-        "flex flex-col items-center justify-start pt-1 pb-1.5 rounded-xl min-h-[52px] transition-colors duration-100 active:scale-[0.96]",
+        "flex flex-col items-center justify-start pt-1 pb-1.5 rounded-xl min-h-[52px] w-full transition-colors duration-100 active:scale-[0.96]",
         isSelected ? "bg-[#183536]" : today ? "bg-[#183536]/10" : weekend ? "bg-slate-100" : "bg-slate-50",
         !inMonth ? "opacity-35" : "",
       ].join(" ")}
@@ -702,7 +452,12 @@ function MobileDayEventCard({
       <div className="flex-1 min-w-0 px-3 py-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="font-semibold text-slate-900 text-sm leading-snug truncate">{event.title}</div>
+            <div className="font-semibold text-slate-900 text-sm leading-snug truncate">
+              {event.title}
+              {event.startTime && event.endTime && (
+                <span className="font-mono text-[10px] text-slate-500 ml-1">({event.startTime} - {event.endTime})</span>
+              )}
+            </div>
             <div className="mt-1 flex items-center gap-1.5 flex-wrap">
               <span
                 className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold text-white"
@@ -802,12 +557,18 @@ function MobileMonthGrid({
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-y-0.5">
+      <div className="grid grid-cols-7 gap-y-0.5 w-full">
         {Array.from({ length: firstWeekday }).map((_, i) => (
           <div key={`empty-${i}`} />
         ))}
         {days.map(({ date, iso, inMonth }) => {
-          const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
+          const dayEvents = events
+            .filter((e) => inRangeISO(iso, e.startDate, e.endDate))
+            .sort((a, b) => {
+              const timeA = a.startTime || "00:00";
+              const timeB = b.startTime || "00:00";
+              return timeA.localeCompare(timeB);
+            });
           return (
             <MobileCompactDayCell
               key={iso}
@@ -818,6 +579,113 @@ function MobileMonthGrid({
               isSelected={iso === selectedIso}
               onClick={() => onSelectDay(iso)}
             />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DesktopMonthGrid({
+  cursor,
+  events,
+  onSelectDay,
+}: {
+  cursor: Date;
+  events: ChantierEvent[];
+  onSelectDay: (iso: string) => void;
+}) {
+  const monthStart = startOfMonth(cursor);
+  const monthEnd = endOfMonth(cursor);
+
+  const days: { date: Date; iso: string; inMonth: boolean }[] = [];
+  for (let d = monthStart; d <= monthEnd; d = addDays(d, 1)) {
+    days.push({
+      date: d,
+      iso: toISODate(d),
+      inMonth: true,
+    });
+  }
+
+  const firstWeekday = (monthStart.getDay() === 0 ? 6 : monthStart.getDay() - 1);
+
+  return (
+    <div className="select-none">
+      <div className="grid grid-cols-7 gap-2 mb-2">
+        {["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"].map((day, i) => (
+          <div key={i} className="text-center text-sm font-semibold text-slate-600 py-2">
+            {day}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-2">
+        {Array.from({ length: firstWeekday }).map((_, i) => (
+          <div key={`empty-${i}`} className="min-h-[100px] rounded-xl bg-slate-50/50" />
+        ))}
+        {days.map(({ date, iso, inMonth }) => {
+          const dayEvents = events
+            .filter((e) => inRangeISO(iso, e.startDate, e.endDate))
+            .sort((a, b) => {
+              const timeA = a.startTime || "00:00";
+              const timeB = b.startTime || "00:00";
+              return timeA.localeCompare(timeB);
+            });
+          const isToday = isTodayISO(iso);
+          const isWeekend = isWeekendISO(iso);
+
+          return (
+            <div
+              key={iso}
+              onClick={() => onSelectDay(iso)}
+              className={[
+                "min-h-[100px] rounded-xl border p-2 cursor-pointer hover:shadow-md transition-shadow",
+                !inMonth ? "opacity-40" : "",
+                isWeekend ? "bg-slate-100" : "bg-white",
+                isToday ? "border-[#183536] ring-2 ring-[#183536]/20" : "border-slate-200",
+              ].join(" ")}
+            >
+              <div className="flex justify-between items-center mb-1">
+                <span className={[
+                  "text-sm font-semibold",
+                  isToday ? "text-[#183536]" : "text-slate-700",
+                ].join(" ")}>
+                  {date.getDate()}
+                </span>
+                {isToday && (
+                  <span className="text-[10px] font-bold text-[#183536] bg-[#183536]/10 rounded-full px-2 py-0.5">
+                    Aujourd'hui
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                {dayEvents.slice(0, 4).map((e) => {
+                  const color = getChantierColor(String(e.type));
+                  const dot = statusDotColor(e.status);
+                  const timeLabel = e.startTime ? `${e.startTime}` : "";
+                  return (
+                    <div
+                      key={e.id}
+                      className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium truncate"
+                      style={{ backgroundColor: color + "20", borderLeft: `3px solid ${color}` }}
+                      title={`${e.title} ${timeLabel}`}
+                    >
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: dot }} />
+                      <span className="truncate text-slate-800">
+                        {e.title}
+                        {timeLabel && <span className="font-mono text-[10px] text-slate-500 ml-1">({timeLabel})</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+                {dayEvents.length > 4 && (
+                  <div className="text-[10px] text-slate-400 font-medium px-1.5 py-0.5">
+                    +{dayEvents.length - 4} autres
+                  </div>
+                )}
+              </div>
+            </div>
           );
         })}
       </div>
@@ -878,7 +746,13 @@ function MobileWeekGrid({
       {days.map(({ date, iso }, i) => {
         const today = isTodayISO(iso);
         const weekend = isWeekendISO(iso);
-        const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
+        const dayEvents = events
+          .filter((e) => inRangeISO(iso, e.startDate, e.endDate))
+          .sort((a, b) => {
+            const timeA = a.startTime || "00:00";
+            const timeB = b.startTime || "00:00";
+            return timeA.localeCompare(timeB);
+          });
 
         return (
           <div
@@ -938,6 +812,9 @@ function MobileWeekGrid({
                           style={{ color }}
                         >
                           {e.title}
+                          {e.startTime && e.endTime && (
+                            <span className="font-mono text-[10px] text-slate-500 ml-1">({e.startTime} - {e.endTime})</span>
+                          )}
                         </span>
                         <span className="flex items-center gap-1 text-[10px] text-slate-500 shrink-0">
                           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dot }} />
@@ -969,7 +846,13 @@ function MobileDayList({
   onPdf: (id: string) => void;
   onAddNew: () => void;
 }) {
-  const dayEvents = events.filter((e) => inRangeISO(selectedIso, e.startDate, e.endDate));
+  const dayEvents = events
+    .filter((e) => inRangeISO(selectedIso, e.startDate, e.endDate))
+    .sort((a, b) => {
+      const timeA = a.startTime || "00:00";
+      const timeB = b.startTime || "00:00";
+      return timeA.localeCompare(timeB);
+    });
 
   return (
     <div className="flex flex-col">
@@ -1024,7 +907,13 @@ function MobileDayPopup({
   onPdf: (id: string) => void;
   onAddNew: () => void;
 }) {
-  const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
+  const dayEvents = events
+    .filter((e) => inRangeISO(iso, e.startDate, e.endDate))
+    .sort((a, b) => {
+      const timeA = a.startTime || "00:00";
+      const timeB = b.startTime || "00:00";
+      return timeA.localeCompare(timeB);
+    });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -1035,7 +924,7 @@ function MobileDayPopup({
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-[90%] bg-white rounded-2xl shadow-2xl min-h-[50vh] max-h-[80dvh] flex flex-col overflow-hidden">
+      <div className="relative w-[90%] max-w-[600px] bg-white rounded-2xl shadow-2xl min-h-[50vh] max-h-[80dvh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <button
             type="button"
@@ -1076,8 +965,6 @@ function MobileDayPopup({
 }
 
 export default function Page() {
-  const isMobile = useIsMobile();
-
   const [view, setView] = useState<ViewMode>("mois");
   const [cursor, setCursor] = useState<Date>(() => startOfDay(new Date()));
 
@@ -1094,14 +981,6 @@ export default function Page() {
   const [mobileSelectedIso, setMobileSelectedIso] = useState<string>(() => toISODate(startOfDay(new Date())));
   const [mobileDayPopupIso, setMobileDayPopupIso] = useState<string | null>(null);
 
-  const [popover, setPopover] = useState<DayPopover>({
-    open: false,
-    iso: "",
-    top: 0,
-    left: 0,
-    width: 420,
-  });
-
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -1109,6 +988,8 @@ export default function Page() {
   const [formType, setFormType] = useState<ChantierType>("Diogène");
   const [formTitle, setFormTitle] = useState("");
   const [formStart, setFormStart] = useState(todayISO);
+  const [formStartTime, setFormStartTime] = useState("09:00");
+  const [formEndTime, setFormEndTime] = useState("10:00");
   const [formEnd, setFormEnd] = useState(todayISO);
   const [formStatus, setFormStatus] = useState<ChantierStatus>("EN_ATTENTE");
   const [formArchived, setFormArchived] = useState(false);
@@ -1141,8 +1022,6 @@ export default function Page() {
   const [photosLoading, setPhotosLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   async function onUploadPhotos(e: React.ChangeEvent<HTMLInputElement>) {
     const jobId = editingId;
@@ -1226,6 +1105,8 @@ export default function Page() {
     setFormTitle("");
     setFormStart(d);
     setFormEnd(d);
+    setFormStartTime("09:00");
+    setFormEndTime("10:00");
     setFormStatus("EN_ATTENTE");
     setFormArchived(false);
     setFormIntervenants([]);
@@ -1253,6 +1134,8 @@ export default function Page() {
     setFormTitle(ev.title);
     setFormStart(ev.startDate);
     setFormEnd(ev.endDate);
+    setFormStartTime(ev.startTime ?? "09:00");
+    setFormEndTime(ev.endTime ?? "10:00");
     setFormStatus(ev.status);
     setFormArchived(ev.archived);
     setFormIntervenants(ev.intervenants?.length ? ev.intervenants : []);
@@ -1306,6 +1189,8 @@ export default function Page() {
           title,
           startDate: formStart,
           endDate: formEnd,
+          startTime: formStartTime,
+          endTime: formEndTime,
           status: formStatus,
           archived: formArchived,
           intervenants: formIntervenants,
@@ -1328,6 +1213,8 @@ export default function Page() {
           title,
           startDate: formStart,
           endDate: formEnd,
+          startTime: formStartTime,
+          endTime: formEndTime,
           status: formStatus,
           archived: formArchived,
           intervenants: formIntervenants,
@@ -1434,70 +1321,15 @@ export default function Page() {
     return `Jour : ${pad2(cursor.getDate())}/${pad2(cursor.getMonth() + 1)}/${cursor.getFullYear()}`;
   }, [cursor, view]);
 
-  async function onDragEnd(evt: DragEndEvent) {
-    const active = String(evt.active.id);
-    const overId = evt.over?.id ? String(evt.over.id) : null;
-    if (!overId || !overId.startsWith("cell:")) return;
-
-    const targetDate = overId.replace("cell:", "");
-    const [eventId, grabbedDate] = active.split("@");
-    if (!eventId || !grabbedDate) return;
-
-    const current = events.find((e) => e.id === eventId);
-    if (!current) return;
-
-    const rawDuration = diffDays(current.startDate, current.endDate);
-    const duration = Math.max(0, rawDuration);
-
-    const offset = diffDays(current.startDate, grabbedDate);
-    const newStart = subDaysISO(targetDate, offset);
-    const newEnd = addDaysISO(newStart, duration);
-
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, startDate: newStart, endDate: newEnd } : e)));
-
-    try {
-      await updateChantier(eventId, { startDate: newStart, endDate: newEnd });
-    } catch (e: any) {
-      setEvents((prev) => prev.map((e) => (e.id === eventId ? current : e)));
-      setError(e?.message ?? "Erreur lors du déplacement");
-    }
-  }
 
   const filteredEvents = useMemo(() => {
     if (statusFilter === "ALL") return events;
     return events.filter((e) => e.status === statusFilter);
   }, [events, statusFilter]);
 
-  const popEvents = useMemo(() => {
-    if (!popover.open) return [];
-    return filteredEvents.filter((e) => inRangeISO(popover.iso, e.startDate, e.endDate));
-  }, [filteredEvents, popover]);
-
-  function openPopoverForDay(iso: string, rect: DOMRect) {
-    const margin = 10;
-    const panelWidth = 420;
-    const panelHeightApprox = 420;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-
-    let left = rect.right + margin;
-    if (left + panelWidth > vw - margin) left = rect.left - panelWidth - margin;
-
-    let top = rect.top;
-    top = clamp(top, margin, vh - panelHeightApprox - margin);
-
-    setPopover({
-      open: true,
-      iso,
-      top,
-      left: clamp(left, margin, vw - panelWidth - margin),
-      width: panelWidth,
-    });
-  }
-
-  if (isMobile) {
-    return (
-      <main className="bg-slate-50">
+  return (
+    <main className="bg-slate-50 min-h-screen">
+      <div className="max-w-[2500px] mx-auto px-0 md:px-6 lg:px-8 py-0 md:py-6">
         {error && (
           <div className="mx-3 mt-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-800 text-sm">
             <div className="font-semibold">Erreur</div>
@@ -1507,41 +1339,46 @@ export default function Page() {
 
         <div className="sticky top-0 z-30 bg-white border-b shadow-sm">
           <div className="px-3 pt-3 pb-2 border-b">
-            <div className="text-lg font-bold leading-tight">Phoenix Ops – Planning</div>
-            <div className="text-xs text-slate-500 mt-0.5">Gestion des chantiers</div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-lg md:text-2xl font-bold leading-tight">Phoenix Ops – Planning</div>
+                <div className="text-xs md:text-sm text-slate-500 mt-0.5">Gestion des chantiers</div>
+              </div>
+              <button
+                onClick={() => openNewChantier()}
+                className="hidden md:flex rounded-xl bg-[#183536] text-white px-6 py-2.5 text-sm font-semibold hover:opacity-90"
+              >
+                + Nouveau chantier
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between px-3 pt-2 pb-1">
-            <div className="flex items-center gap-1">
-              <button onClick={gotoPrev} className="h-7 w-7 flex items-center justify-center rounded-lg border bg-white text-slate-600 text-base active:bg-slate-100" aria-label="Précédent">‹</button>
-              <button onClick={gotoNext} className="h-7 w-7 flex items-center justify-center rounded-lg border bg-white text-slate-600 text-base active:bg-slate-100" aria-label="Suivant">›</button>
+            <div className="flex items-center gap-1 md:gap-2">
+              <button onClick={gotoPrev} className="h-7 w-7 md:h-10 md:w-10 flex items-center justify-center rounded-lg md:rounded-xl border bg-white text-slate-600 text-base md:text-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
+                ‹
+              </button>
+              <button onClick={gotoNext} className="h-7 w-7 md:h-10 md:w-10 flex items-center justify-center rounded-lg md:rounded-xl border bg-white text-slate-600 text-base md:text-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
+                ›
+              </button>
+              <button onClick={gotoToday} className="hidden md:flex rounded-xl bg-[#183536] text-white px-4 py-2 text-sm font-semibold hover:opacity-90">
+                Aujourd'hui
+              </button>
             </div>
 
-            <div className={view === "mois" ? "font-bold text-base text-slate-900" : "font-semibold text-[11px] text-slate-700 text-center"}>
+            <div className={view === "mois" ? "font-bold text-base text-slate-900" : "font-semibold text-[10px] md:text-[11px] text-slate-700 text-center"}>
               {view === "mois" ? monthTitleFRFull(cursor) : headerTitle}
             </div>
 
             <div className="flex items-center gap-1">
-              <div className="flex rounded-xl border overflow-hidden">
-                <button
-                  onClick={() => setView("mois")}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold ${view === "mois" ? FOREST_BTN : "bg-white text-slate-600"}`}
-                >
+              <div className="flex rounded-lg md:rounded-xl border overflow-hidden">
+                <button onClick={() => setView("mois")} className={`px-2.5 py-1.5 md:px-4 md:py-2 text-[11px] md:text-sm font-semibold ${view === "mois" ? FOREST_BTN : "bg-white text-slate-600 hover:bg-slate-50"}`}>
                   Mois
                 </button>
-                <button
-                  onClick={() => setView("semaine")}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold border-l ${view === "semaine" ? FOREST_BTN : "bg-white text-slate-600"}`}
-                >
+                <button onClick={() => setView("semaine")} className={`px-2.5 py-1.5 md:px-4 md:py-2 text-[11px] md:text-sm font-semibold border-l ${view === "semaine" ? FOREST_BTN : "bg-white text-slate-600 hover:bg-slate-50"}`}>
                   Sem.
                 </button>
-                <button
-                  onClick={() => {
-                    setView("jour");
-                    setCursor(parseISODateUTC(mobileSelectedIso));
-                  }}
-                  className={`px-2.5 py-1.5 text-[11px] font-semibold border-l ${view === "jour" ? FOREST_BTN : "bg-white text-slate-600"}`}
-                >
+                <button onClick={() => { setView("jour"); setCursor(parseISODateUTC(mobileSelectedIso)); }} className={`px-2.5 py-1.5 md:px-4 md:py-2 text-[11px] md:text-sm font-semibold border-l ${view === "jour" ? FOREST_BTN : "bg-white text-slate-600 hover:bg-slate-50"}`}>
                   Jour
                 </button>
               </div>
@@ -1552,21 +1389,41 @@ export default function Page() {
             {loading ? (
               <div className="text-center py-4 text-sm text-slate-500">Chargement…</div>
             ) : view === "mois" ? (
-              <MobileMonthGrid
-                cursor={cursor}
-                events={filteredEvents}
-                selectedIso={mobileSelectedIso}
-                onSelectDay={(iso) => {
-                  setMobileSelectedIso(iso);
-                  const [y, m] = iso.split("-").map(Number);
-                  if (y !== cursor.getFullYear() || m !== cursor.getMonth() + 1) {
-                    setCursor(new Date(y, m - 1, 1));
-                  }
-                  setMobileDayPopupIso(iso);
-                }}
-                onSwipeLeft={mobileSwipeLeft}
-                onSwipeRight={mobileSwipeRight}
-              />
+              <>
+                {/* Version mobile */}
+                <div className="md:hidden">
+                  <MobileMonthGrid
+                    cursor={cursor}
+                    events={filteredEvents}
+                    selectedIso={mobileSelectedIso}
+                    onSelectDay={(iso) => {
+                      setMobileSelectedIso(iso);
+                      const [y, m] = iso.split("-").map(Number);
+                      if (y !== cursor.getFullYear() || m !== cursor.getMonth() + 1) {
+                        setCursor(new Date(y, m - 1, 1));
+                      }
+                      setMobileDayPopupIso(iso);
+                    }}
+                    onSwipeLeft={mobileSwipeLeft}
+                    onSwipeRight={mobileSwipeRight}
+                  />
+                </div>
+                {/* Version desktop */}
+                <div className="hidden md:block">
+                  <DesktopMonthGrid
+                    cursor={cursor}
+                    events={filteredEvents}
+                    onSelectDay={(iso) => {
+                      setMobileSelectedIso(iso);
+                      const [y, m] = iso.split("-").map(Number);
+                      if (y !== cursor.getFullYear() || m !== cursor.getMonth() + 1) {
+                        setCursor(new Date(y, m - 1, 1));
+                      }
+                      setMobileDayPopupIso(iso);
+                    }}
+                  />
+                </div>
+              </>
             ) : view === "semaine" ? (
               <MobileWeekGrid
                 cursor={cursor}
@@ -1632,6 +1489,8 @@ export default function Page() {
             formTitle={formTitle} setFormTitle={setFormTitle}
             formStart={formStart} setFormStart={setFormStart}
             formEnd={formEnd} setFormEnd={setFormEnd}
+            formStartTime={formStartTime} setFormStartTime={setFormStartTime}
+            formEndTime={formEndTime} setFormEndTime={setFormEndTime}
             formStatus={formStatus} setFormStatus={setFormStatus}
             formArchived={formArchived} setFormArchived={setFormArchived}
             formIntervenants={formIntervenants} setFormIntervenants={setFormIntervenants}
@@ -1652,192 +1511,7 @@ export default function Page() {
             onCancel={() => setModalOpen(false)}
           />
         </Modal>
-      </main>
-    );
-  }
-
-  return (
-    <main className="bg-slate-50">
-      <div className="bg-white border-b hidden md:block">
-        <div className="mx-auto max-w-6xl px-6 py-5 flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-3xl font-bold truncate">Phoenix Ops – Planning</div>
-            <div className="text-slate-600 mt-1 truncate">Gestion des chantiers : Diogène, post-mortem, insalubre, 3D…</div>
-          </div>
-
-          <button
-            onClick={() => openNewChantier()}
-            className={`shrink-0 rounded-xl px-5 py-3 font-semibold hover:opacity-95 ${FOREST_BTN}`}
-            disabled={saving}
-          >
-            + Nouveau
-          </button>
-        </div>
       </div>
-
-      <div className="mx-auto max-w-6xl px-3 py-4 md:px-6 md:py-8 space-y-4 md:space-y-6">
-        {error ? (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-800">
-            <div className="font-semibold">Erreur</div>
-            <div className="text-sm mt-1 whitespace-pre-wrap">{error}</div>
-          </div>
-        ) : null}
-
-        <div className="rounded-2xl border bg-white p-3 md:p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div className="text-2xl font-bold">Planning</div>
-
-            <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <button onClick={() => setView("jour")} className={`rounded-lg border px-4 py-3 font-semibold ${view === "jour" ? FOREST_BTN : "bg-white"}`}>
-                Jour
-              </button>
-              <button onClick={() => setView("semaine")} className={`rounded-lg border px-4 py-3 font-semibold ${view === "semaine" ? FOREST_BTN : "bg-white"}`}>
-                Semaine
-              </button>
-              <button onClick={() => setView("mois")} className={`rounded-lg border px-4 py-3 font-semibold ${view === "mois" ? FOREST_BTN : "bg-white"}`}>
-                Mois
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 mt-3 overflow-x-auto whitespace-nowrap pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <button onClick={() => setStatusFilter("ALL")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "ALL" ? FOREST_BTN : "bg-white"}`}>
-              Tous
-            </button>
-            <button onClick={() => setStatusFilter("EN_ATTENTE")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "EN_ATTENTE" ? FOREST_BTN : "bg-white"}`}>
-              En attente
-            </button>
-            <button onClick={() => setStatusFilter("EN_COURS")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "EN_COURS" ? FOREST_BTN : "bg-white"}`}>
-              En cours
-            </button>
-            <button onClick={() => setStatusFilter("TERMINE")} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${statusFilter === "TERMINE" ? FOREST_BTN : "bg-white"}`}>
-              Terminé
-            </button>
-          </div>
-
-          <div className="mt-4 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <button onClick={gotoPrev} className="h-10 w-10 rounded-full border bg-white hover:bg-slate-50" aria-label="Précédent">
-                ‹
-              </button>
-              <button onClick={gotoNext} className="h-10 w-10 rounded-full border bg-white hover:bg-slate-50" aria-label="Suivant">
-                ›
-              </button>
-              <button onClick={gotoToday} className={`rounded-lg px-3 py-2 text-sm font-semibold ${FOREST_BTN}`}>
-                Aujourd'hui
-              </button>
-              <button onClick={refresh} className="rounded-lg border px-3 py-2 text-sm font-semibold hover:bg-slate-50" disabled={loading || saving}>
-                {loading ? "Chargement…" : "Rafraîchir"}
-              </button>
-            </div>
-
-            <div className="text-slate-700 font-semibold hidden md:block">{headerTitle}</div>
-            <div className="w-[140px] hidden md:block" />
-          </div>
-
-          <div className="md:hidden mt-3 text-slate-700 font-semibold">{headerTitle}</div>
-
-          <div className="mt-5">
-            {loading ? (
-              <div className="rounded-xl border bg-slate-50 p-4 text-slate-700">Chargement du planning…</div>
-            ) : (
-              <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragEnd={onDragEnd}>
-                {view === "mois" && (
-                  <MonthGrid
-                    cursor={cursor}
-                    events={filteredEvents}
-                    onCellClick={(iso) => openNewChantier(iso)}
-                    onEventClick={(id) => {
-                      const ev = events.find((x) => x.id === id);
-                      if (ev) openEditChantier(ev);
-                    }}
-                    onPdf={(id) => openPdf(id)}
-                    onMore={(iso, rect) => openPopoverForDay(iso, rect)}
-                  />
-                )}
-
-                {view === "semaine" && (
-                  <WeekGrid
-                    cursor={cursor}
-                    events={filteredEvents}
-                    onCellClick={(iso) => openNewChantier(iso)}
-                    onEventClick={(id) => {
-                      const ev = events.find((x) => x.id === id);
-                      if (ev) openEditChantier(ev);
-                    }}
-                    onPdf={(id) => openPdf(id)}
-                  />
-                )}
-
-                {view === "jour" && (
-                  <DayView
-                    cursor={cursor}
-                    events={filteredEvents}
-                    onAdd={() => openNewChantier(toISODate(cursor))}
-                    onEventClick={(id) => {
-                      const ev = events.find((x) => x.id === id);
-                      if (ev) openEditChantier(ev);
-                    }}
-                    onPdf={(id) => openPdf(id)}
-                  />
-                )}
-              </DndContext>
-            )}
-          </div>
-        </div>
-
-        <Legend title="Légende des chantiers" />
-      </div>
-
-      <DayEventsPopover
-        pop={popover}
-        events={popEvents}
-        onClose={() => setPopover((p) => ({ ...p, open: false }))}
-        onOpenEvent={(id) => {
-          const ev = events.find((x) => x.id === id);
-          if (ev) openEditChantier(ev);
-        }}
-        onPdf={(id) => openPdf(id)}
-        isMobile={isMobile}
-      />
-
-      <Modal open={modalOpen} title={editingId ? "Modifier chantier" : "Nouveau chantier"} onClose={() => setModalOpen(false)}>
-        <ModalForm
-          editingId={editingId}
-          saving={saving}
-          staffLoading={staffLoading}
-          staff={staff}
-          inactiveAssigned={inactiveAssigned}
-          photos={photos}
-          setPhotos={setPhotos}
-          setError={setError}
-          photosLoading={photosLoading}
-          fileInputRef={fileInputRef}
-          cameraInputRef={cameraInputRef}
-          formType={formType} setFormType={setFormType}
-          formTitle={formTitle} setFormTitle={setFormTitle}
-          formStart={formStart} setFormStart={setFormStart}
-          formEnd={formEnd} setFormEnd={setFormEnd}
-          formStatus={formStatus} setFormStatus={setFormStatus}
-          formArchived={formArchived} setFormArchived={setFormArchived}
-          formIntervenants={formIntervenants} setFormIntervenants={setFormIntervenants}
-          formRecurrenceFrequency={formRecurrenceFrequency} setFormRecurrenceFrequency={setFormRecurrenceFrequency}
-          formRecurrenceEndDate={formRecurrenceEndDate} setFormRecurrenceEndDate={setFormRecurrenceEndDate}
-          formNotes={formNotes} setFormNotes={setFormNotes}
-          clientNom={clientNom} setClientNom={setClientNom}
-          clientTel={clientTel} setClientTel={setClientTel}
-          clientEmail={clientEmail} setClientEmail={setClientEmail}
-          clientAdresse={clientAdresse} setClientAdresse={setClientAdresse}
-          onUploadPhotos={onUploadPhotos}
-          onRefreshStaff={refreshStaff}
-          onRefreshPhotos={refreshPhotos}
-          onOpenPdf={openPdf}
-          onSave={saveChantier}
-          onFinishAndPdf={finishAndOpenPdf}
-          onDelete={deleteCurrent}
-          onCancel={() => setModalOpen(false)}
-        />
-      </Modal>
     </main>
   );
 }
@@ -1849,6 +1523,8 @@ function ModalForm({
   formTitle, setFormTitle,
   formStart, setFormStart,
   formEnd, setFormEnd,
+  formStartTime, setFormStartTime,
+  formEndTime, setFormEndTime,
   formStatus, setFormStatus,
   formArchived, setFormArchived,
   formIntervenants, setFormIntervenants,
@@ -1877,6 +1553,8 @@ function ModalForm({
   formTitle: string; setFormTitle: (v: string) => void;
   formStart: string; setFormStart: (v: string) => void;
   formEnd: string; setFormEnd: (v: string) => void;
+  formStartTime: string; setFormStartTime: (v: string) => void;
+  formEndTime: string; setFormEndTime: (v: string) => void;
   formStatus: ChantierStatus; setFormStatus: (v: ChantierStatus) => void;
   formArchived: boolean; setFormArchived: (v: boolean) => void;
   formIntervenants: string[]; setFormIntervenants: (v: string[]) => void;
@@ -2074,21 +1752,60 @@ function ModalForm({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Date début</label>
-              <input
-                type="date"
-                value={formStart}
-                onChange={(e) => setFormStart(e.target.value)}
-                className="w-full rounded-xl border px-3 py-2.5 text-sm"
-              />
+              <input type="date" value={formStart} onChange={(e) => setFormStart(e.target.value)} className="w-full rounded-xl border px-3 py-2.5 text-sm" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Date fin</label>
-              <input
-                type="date"
-                value={formEnd}
-                onChange={(e) => setFormEnd(e.target.value)}
-                className="w-full rounded-xl border px-3 py-2.5 text-sm"
-              />
+              <input type="date" value={formEnd} onChange={(e) => setFormEnd(e.target.value)} className="w-full rounded-xl border px-3 py-2.5 text-sm" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Heure début</label>
+              <div className="flex gap-2">
+                <select
+                  value={splitTime(formStartTime)[0]}
+                  onChange={(e) => setFormStartTime(`${e.target.value}:${splitTime(formStartTime)[1]}`)}
+                  className="w-1/2 rounded-xl border px-2 py-2.5 text-sm"
+                >
+                  {HOURS_LIST.map((h) => (
+                    <option key={h} value={h}>{h}h</option>
+                  ))}
+                </select>
+                <select
+                  value={splitTime(formStartTime)[1]}
+                  onChange={(e) => setFormStartTime(`${splitTime(formStartTime)[0]}:${e.target.value}`)}
+                  className="w-1/2 rounded-xl border px-2 py-2.5 text-sm"
+                >
+                  {MINUTES_LIST_15.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Heure fin</label>
+              <div className="flex gap-2">
+                <select
+                  value={splitTime(formEndTime)[0]}
+                  onChange={(e) => setFormEndTime(`${e.target.value}:${splitTime(formEndTime)[1]}`)}
+                  className="w-1/2 rounded-xl border px-2 py-2.5 text-sm"
+                >
+                  {HOURS_LIST.map((h) => (
+                    <option key={h} value={h}>{h}h</option>
+                  ))}
+                </select>
+                <select
+                  value={splitTime(formEndTime)[1]}
+                  onChange={(e) => setFormEndTime(`${splitTime(formEndTime)[0]}:${e.target.value}`)}
+                  className="w-1/2 rounded-xl border px-2 py-2.5 text-sm"
+                >
+                  {MINUTES_LIST_15.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -2292,214 +2009,5 @@ function ModalForm({
       </div>
 
     </div>
-  );
-}
-
-function MonthGrid({
-  cursor,
-  events,
-  onCellClick,
-  onEventClick,
-  onPdf,
-  onMore,
-}: {
-  cursor: Date;
-  events: ChantierEvent[];
-  onCellClick: (iso: string) => void;
-  onEventClick: (eventId: string) => void;
-  onPdf: (eventId: string) => void;
-  onMore: (iso: string, rect: DOMRect) => void;
-}) {
-  const monthStart = startOfMonth(cursor);
-  const monthEnd = endOfMonth(cursor);
-  const gridStart = startOfWeekMonday(monthStart);
-  const gridEnd = addDays(startOfWeekMonday(addDays(monthEnd, 6)), 6);
-
-  const days: Date[] = [];
-  for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
-
-  return (
-    <div className="space-y-3">
-      <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="min-w-[760px] md:min-w-0">
-          <div className="grid grid-cols-7 gap-3 px-1">
-            {Array.from({ length: 7 }).map((_, i) => (
-              <div key={i} className="text-center text-slate-600 font-semibold">
-                {weekdayShortFR(i)}
-              </div>
-            ))}
-          </div>
-
-          <div className="mt-3 grid grid-cols-7 gap-3">
-            {days.map((d) => {
-              const iso = toISODate(d);
-              const inMonth = d.getMonth() === cursor.getMonth();
-              const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
-
-              const visible = dayEvents.slice(0, 3);
-              const hiddenCount = Math.max(0, dayEvents.length - visible.length);
-
-              return (
-                <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={!inMonth} onClick={() => onCellClick(iso)}>
-                  {visible.map((e) => (
-                    <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
-                  ))}
-
-                  {hiddenCount > 0 && (
-                    <button
-                      type="button"
-                      className="w-full rounded-lg border bg-white px-2 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 min-h-[44px]"
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        const cell = ev.currentTarget.closest("[data-iso]") as HTMLElement | null;
-                        const rect = cell?.getBoundingClientRect();
-                        if (rect) onMore(iso, rect);
-                      }}
-                      title="Afficher les autres chantiers"
-                    >
-                      +{hiddenCount} autres
-                    </button>
-                  )}
-                </DroppableDayCell>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WeekGrid({
-  cursor,
-  events,
-  onCellClick,
-  onEventClick,
-  onPdf,
-}: {
-  cursor: Date;
-  events: ChantierEvent[];
-  onCellClick: (iso: string) => void;
-  onEventClick: (eventId: string) => void;
-  onPdf: (eventId: string) => void;
-}) {
-  const w0 = startOfWeekMonday(cursor);
-  const days = Array.from({ length: 7 }).map((_, i) => addDays(w0, i));
-
-  return (
-    <div className="space-y-3">
-      <div className="overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="min-w-[760px] md:min-w-0">
-          <div className="grid grid-cols-7 gap-3 px-1">
-            {days.map((d, i) => {
-              const iso = toISODate(d);
-              const today = isTodayISO(iso);
-              return (
-                <div key={i} className="text-center">
-                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">{weekdayShortFR(i)}</div>
-                  <div className={[
-                    "mx-auto mt-1 flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold",
-                    today ? "bg-[#183536] text-white" : "text-slate-700",
-                  ].join(" ")}>{d.getDate()}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-3 grid grid-cols-7 gap-3">
-            {days.map((d) => {
-              const iso = toISODate(d);
-              const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
-
-              return (
-                <DroppableDayCell key={iso} iso={iso} dayNumber={d.getDate()} faded={false} onClick={() => onCellClick(iso)}>
-                  {dayEvents.map((e) => (
-                    <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />
-                  ))}
-                </DroppableDayCell>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DayView({
-  cursor,
-  events,
-  onAdd,
-  onEventClick,
-  onPdf,
-}: {
-  cursor: Date;
-  events: ChantierEvent[];
-  onAdd: () => void;
-  onEventClick: (eventId: string) => void;
-  onPdf: (eventId: string) => void;
-}) {
-  const iso = toISODate(cursor);
-  const dayEvents = events.filter((e) => inRangeISO(iso, e.startDate, e.endDate));
-
-  return (
-    <DroppableDayCell iso={iso} dayNumber={cursor.getDate()} faded={false} onClick={onAdd}>
-      {dayEvents.length === 0 ? (
-        <div className="text-sm text-slate-500">Aucun chantier prévu.</div>
-      ) : (
-        dayEvents.map((e) => <EventPill key={`${e.id}@${iso}`} e={e} cellISO={iso} onEventClick={onEventClick} onPdf={onPdf} />)
-      )}
-    </DroppableDayCell>
-  );
-}
-
-function EventPill({
-  e,
-  cellISO,
-  onEventClick,
-  onPdf,
-}: {
-  e: ChantierEvent;
-  cellISO: string;
-  onEventClick: (id: string) => void;
-  onPdf: (id: string) => void;
-}) {
-  const bg = getChantierColor(String(e.type));
-
-  const statusLabel = e.status === "EN_ATTENTE" ? "En attente" : e.status === "EN_COURS" ? "En cours" : "Terminé";
-
-  const statusDotStyle: React.CSSProperties =
-    e.status === "EN_ATTENTE"
-      ? { backgroundColor: "#64748b" }
-      : e.status === "EN_COURS"
-        ? { backgroundColor: "#f59e0b" }
-        : { backgroundColor: "#22c55e" };
-
-  return (
-    <DraggablePill draggableId={`${e.id}@${cellISO}`} style={{ backgroundColor: bg }} onClick={() => onEventClick(e.id)}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-white font-semibold leading-5">{e.title}</div>
-        </div>
-
-        <button
-          type="button"
-          className="shrink-0 rounded-md px-2 py-1 text-[10px] font-bold bg-black/30 text-white hover:bg-black/40"
-          title="Ouvrir le PDF"
-          onPointerDown={(ev) => ev.stopPropagation()}
-          onClick={(ev) => {
-            ev.stopPropagation();
-            onPdf(e.id);
-          }}
-        >
-          PDF
-        </button>
-      </div>
-
-      <div className="mt-1 inline-flex items-center gap-2 rounded-md bg-white/85 px-2 py-0.5 text-[10px] font-bold text-slate-900 whitespace-nowrap">
-        <span className="h-2 w-2 rounded-full" style={statusDotStyle} aria-hidden="true" />
-        <span>{statusLabel}</span>
-      </div>
-    </DraggablePill>
   );
 }

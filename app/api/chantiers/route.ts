@@ -80,7 +80,7 @@ function mapUITypeToEnum(typeLabel: string) {
   if (k === "nettoyage de bureau" || k === "nettoyage bureau") return "NETTOYAGE_BUREAU";
   if (k === "sinistre incendie") return "SINISTRE_INCENDIE";
   if (k === "degats des eaux") return "DEGATS_DES_EAUX";
-  
+
   return "DEVIS";
 }
 
@@ -157,10 +157,12 @@ async function jobItemToUI(item: any) {
 
   return {
     id: item.id,
-    type: mapEnumTypeToUILabel(String(item.type)), // ✅ UI label
+    type: mapEnumTypeToUILabel(String(item.type)),
     title: item.title,
     startDate: startISO,
     endDate: endISO,
+    startTime: item.startTime ?? undefined,
+    endTime: item.endTime ?? undefined,
     status: item.status,
     archived: Boolean(item.archivedAt),
     intervenants,
@@ -180,21 +182,21 @@ async function jobItemToUI(item: any) {
 export async function GET(req: NextRequest) {
   try {
     const auth = await requireReadAccess(req);
-if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const session = await getServerSession(authOptions);
     if (!session) {
       const dbUser = await getDbUserFromSession(session);
-if (!dbUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-if (!dbUser.isActive) return NextResponse.json({ error: "User disabled" }, { status: 403 });
-// pas de check role ici => ADMIN + USER peuvent lire
+      if (!dbUser) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      if (!dbUser.isActive) return NextResponse.json({ error: "User disabled" }, { status: 403 });
+      // pas de check role ici => ADMIN + USER peuvent lire
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const archived = parseArchived(req);
 
     const where: any = {
-  isRecurringTemplate: false,
-};
+      isRecurringTemplate: false,
+    };
     if (archived === true) where.archivedAt = { not: null };
     if (archived === false) where.archivedAt = null;
 
@@ -226,7 +228,7 @@ if (!dbUser.isActive) return NextResponse.json({ error: "User disabled" }, { sta
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireWriteAccess(req);
-if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+    if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
     const session = await getServerSession(authOptions);
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -272,6 +274,8 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
 
     const startDate = (body as any).startDate;
     const endDate = (body as any).endDate;
+    const startTime = (body as any).startTime || "00:00";
+    const endTime = (body as any).endTime || "00:00";
     const startAtRaw = (body as any).startAt;
     const endAtRaw = (body as any).endAt;
 
@@ -279,8 +283,8 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
     let endAt: Date;
 
     if (startDate && endDate) {
-      startAt = dateOnlyToStartUTC(startDate);
-      endAt = dateOnlyToEndUTC(endDate);
+      startAt = new Date(`${startDate}T${startTime}:00`);
+      endAt = new Date(`${endDate}T${endTime}:00`);
     } else if (startAtRaw && endAtRaw) {
       startAt = new Date(startAtRaw);
       endAt = new Date(endAtRaw);
@@ -296,7 +300,7 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
       ? (body as any).intervenants
       : [];
 
-        const recurrenceFrequency = String((body as any).recurrenceFrequency ?? "NONE").toUpperCase();
+    const recurrenceFrequency = String((body as any).recurrenceFrequency ?? "NONE").toUpperCase();
     const recurrenceEndDateRaw = (body as any).recurrenceEndDate
       ? String((body as any).recurrenceEndDate)
       : null;
@@ -343,6 +347,8 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
           status: status as any,
           startAt,
           endAt,
+          startTime: startTime,
+          endTime: endTime,
           notes,
           createdById: dbUser.id,
           archivedAt: null,
@@ -407,6 +413,8 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
         status: status as any,
         startAt,
         endAt,
+        startTime: startTime,
+        endTime: endTime,
         notes,
         createdById: dbUser.id,
         archivedAt: null,
@@ -439,6 +447,8 @@ if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.sta
           status: status as any,
           startAt: cursorStart,
           endAt: cursorEnd,
+          startTime: startTime,
+          endTime: endTime, 
           notes,
           createdById: dbUser.id,
           archivedAt: null,

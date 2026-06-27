@@ -101,10 +101,12 @@ async function jobItemToUI(item: any) {
 
   return {
     id: item.id,
-    type: mapEnumTypeToUILabel(String(item.type)), // ✅ UI label
+    type: mapEnumTypeToUILabel(String(item.type)),
     title: item.title,
     startDate: startISO,
     endDate: endISO,
+    startTime: item.startTime ?? undefined,
+    endTime: item.endTime ?? undefined,
     status: item.status,
     archived: Boolean(item.archivedAt),
     intervenants,
@@ -168,19 +170,28 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     // status
     if ((body as any).status) data.status = String((body as any).status);
 
+    // 📌 Récupérer les heures (UNE SEULE FOIS)
+    const startTime = (body as any).startTime || "00:00";
+    const endTime = (body as any).endTime || "00:00";
+
     // dates (UI ou DB)
     const startDate = (body as any).startDate as string | undefined;
     const endDate = (body as any).endDate as string | undefined;
     const startAtRaw = (body as any).startAt as string | undefined;
     const endAtRaw = (body as any).endAt as string | undefined;
 
+    // ✅ Gestion des dates avec heures
     if (startDate && endDate) {
-      data.startAt = dateOnlyToStartUTC(startDate);
-      data.endAt = dateOnlyToEndUTC(endDate);
+      data.startAt = new Date(`${startDate}T${startTime}:00`);
+      data.endAt = new Date(`${endDate}T${endTime}:00`);
     } else {
       if (startAtRaw) data.startAt = new Date(startAtRaw);
       if (endAtRaw) data.endAt = new Date(endAtRaw);
     }
+
+    // ✅ TOUJOURS sauvegarder les heures si fournies
+    data.startTime = startTime;
+    data.endTime = endTime;
 
     // notes
     if (typeof (body as any).notes === "string") {
