@@ -1616,7 +1616,7 @@ function ModalForm({
             {safePhotos.length === 0 && !photosLoading ? (
               <div className="px-4 py-5 text-sm text-slate-400 text-center">Aucune photo pour l'instant.</div>
             ) : (
-              <div className="grid grid-cols-3 gap-1 p-2">
+              <div className="grid grid-cols-3 gap-1 p-2 max-h-[300px] overflow-y-auto">
                 {safePhotos
                   .filter((p) => p && typeof p.id === "string" && typeof p.fileUrl === "string" && p.fileUrl.length > 0)
                   .map((p) => (
